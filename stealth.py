@@ -84,6 +84,7 @@ class BoardReader:
             windows = Quartz.CGWindowListCopyWindowInfo(
                 Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID
             )
+            candidates = []
             for w in windows:
                 if w.get('kCGWindowOwnerName') != 'Chess':
                     continue
@@ -91,8 +92,12 @@ class BoardReader:
                 bounds = w.get('kCGWindowBounds', {})
                 height = bounds.get('Height', 0)
                 if 'Game' in name and height > 200:
-                    self.window_id = w['kCGWindowNumber']
-                    return True
+                    candidates.append((w['kCGWindowNumber'], height))
+            if candidates:
+                # Pick the largest window (main game window)
+                candidates.sort(key=lambda c: c[1], reverse=True)
+                self.window_id = candidates[0][0]
+                return True
         except Exception:
             pass
         return False
@@ -115,6 +120,7 @@ class BoardReader:
         """Capture Chess.app window."""
         if self.window_id is None:
             return None
+        tmp = None
         try:
             fd, tmp = tempfile.mkstemp(suffix='.png', prefix='chess_')
             os.close(fd)
@@ -123,15 +129,26 @@ class BoardReader:
                 capture_output=True, timeout=5
             )
             if result.returncode != 0:
-                os.unlink(tmp)
-                return None
+                # Try re-finding window (ID may have changed)
+                self.find_window()
+                if self.window_id:
+                    result = subprocess.run(
+                        ['screencapture', '-l', str(self.window_id), '-x', '-o', tmp],
+                        capture_output=True, timeout=5
+                    )
+                if result.returncode != 0:
+                    os.unlink(tmp)
+                    return None
             img = Image.open(tmp)
             img.load()
             os.unlink(tmp)
+            if img.size[0] < 50 or img.size[1] < 50:
+                return None
             return img
         except Exception:
             try:
-                os.unlink(tmp)
+                if tmp:
+                    os.unlink(tmp)
             except Exception:
                 pass
             return None
