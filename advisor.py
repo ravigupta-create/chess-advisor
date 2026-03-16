@@ -169,20 +169,28 @@ class BoardWatcher:
             return None
 
     def _capture_window(self):
-        """Capture the Chess.app window using screencapture."""
+        """Capture the Chess.app window using screencapture. Cleans up temp file."""
         if self.window_id is None:
             return None
         try:
-            tmp = os.path.join(tempfile.gettempdir(), 'chess_advisor_capture.png')
+            fd, tmp = tempfile.mkstemp(suffix='.png', prefix='chess_adv_')
+            os.close(fd)
             result = subprocess.run(
                 ['screencapture', '-l', str(self.window_id), '-x', '-o', tmp],
                 capture_output=True, timeout=5
             )
             if result.returncode != 0:
+                os.unlink(tmp)
                 return None
             img = Image.open(tmp)
+            img.load()  # Load pixels into memory so we can delete the file
+            os.unlink(tmp)
             return img
         except Exception:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
             return None
 
     def _is_board_pixel(self, r, g, b):
@@ -205,17 +213,18 @@ class BoardWatcher:
     def _calibrate_grid(self, img):
         """Detect the 8x8 board grid within the captured window image."""
         w, h = img.size
+        pixels = img.load()  # Fast pixel access object
 
         # Find board horizontal extent by scanning along vertical center
         cy = h // 2
         left = right = 0
         for x in range(w):
-            r, g, b = img.getpixel((x, cy))[:3]
+            r, g, b = pixels[x, cy][:3]
             if self._is_board_pixel(r, g, b):
                 left = x
                 break
         for x in range(w - 1, -1, -1):
-            r, g, b = img.getpixel((x, cy))[:3]
+            r, g, b = pixels[x, cy][:3]
             if self._is_board_pixel(r, g, b):
                 right = x
                 break
@@ -226,7 +235,7 @@ class BoardWatcher:
         # Find column boundaries by detecting brightness transitions
         brightness = []
         for x in range(left, right + 1):
-            r, g, b = img.getpixel((x, cy))[:3]
+            r, g, b = pixels[x, cy][:3]
             brightness.append((r + g + b) / 3)
 
         win = 5
@@ -250,7 +259,6 @@ class BoardWatcher:
         if len(filtered) == 9:
             self.col_edges = [x for x, _ in filtered]
         else:
-            # Estimate uniform grid from board left/right extent
             board_width = right - left
             sq_w = board_width / 8
             self.col_edges = [int(left + i * sq_w) for i in range(9)]
@@ -259,12 +267,12 @@ class BoardWatcher:
         cx = w // 2
         top = bottom = 0
         for y in range(50, h):
-            r, g, b = img.getpixel((cx, y))[:3]
+            r, g, b = pixels[cx, y][:3]
             if self._is_board_pixel(r, g, b):
                 top = y
                 break
         for y in range(h - 1, 0, -1):
-            r, g, b = img.getpixel((cx, y))[:3]
+            r, g, b = pixels[cx, y][:3]
             if self._is_board_pixel(r, g, b):
                 bottom = y
                 break
@@ -286,8 +294,8 @@ class BoardWatcher:
         y = int(self.row_top + (7 - rank + 0.5) * row_height)
         return x, y
 
-    def _get_square_diff(self, img1, img2, file, rank):
-        """Compare a square between two screenshots. Returns avg pixel difference."""
+    def _get_square_diff(self, px1, px2, w, h, file, rank):
+        """Compare a square between two screenshots using fast pixel access."""
         cx, cy = self._get_square_center(file, rank)
         sq_w = (self.col_edges[1] - self.col_edges[0]) if len(self.col_edges) > 1 else 100
         half = max(5, int(sq_w * 0.25))
@@ -297,9 +305,9 @@ class BoardWatcher:
         for dy in range(-half, half + 1, 3):
             for dx in range(-half, half + 1, 3):
                 px, py = cx + dx, cy + dy
-                if 0 <= px < img1.width and 0 <= py < img1.height:
-                    r1, g1, b1 = img1.getpixel((px, py))[:3]
-                    r2, g2, b2 = img2.getpixel((px, py))[:3]
+                if 0 <= px < w and 0 <= py < h:
+                    r1, g1, b1 = px1[px, py][:3]
+                    r2, g2, b2 = px2[px, py][:3]
                     total_diff += abs(r1 - r2) + abs(g1 - g2) + abs(b1 - b2)
                     count += 1
 
@@ -307,10 +315,15 @@ class BoardWatcher:
 
     def _detect_changed_squares(self, before, after):
         """Find squares that changed between two screenshots."""
+        # Use fast pixel access objects (loaded once, used for all 64 squares)
+        px1 = before.load()
+        px2 = after.load()
+        w = min(before.width, after.width)
+        h = min(before.height, after.height)
         changed = []
         for rank in range(8):
             for file in range(8):
-                diff = self._get_square_diff(before, after, file, rank)
+                diff = self._get_square_diff(px1, px2, w, h, file, rank)
                 if diff > DIFF_THRESHOLD:
                     changed.append((file, rank, diff))
         changed.sort(key=lambda x: -x[2])
@@ -354,11 +367,24 @@ class BoardWatcher:
         return best_match
 
     def get_window_title(self):
-        """Get the current window title to detect whose turn it is."""
+        """Get the current window title using cached window ID (fast path)."""
+        if self.window_id is not None:
+            try:
+                # Query only the specific window by ID — much faster than enumerating all
+                info_list = Quartz.CGWindowListCopyWindowInfo(
+                    Quartz.kCGWindowListOptionIncludingWindow, self.window_id
+                )
+                if info_list and len(info_list) > 0:
+                    name = info_list[0].get('kCGWindowName', '')
+                    if name:
+                        return name
+            except Exception:
+                pass
+        # Fallback: full enumeration if cached ID failed
         try:
             winfo = self._find_chess_window()
             if winfo:
-                self.window_id = winfo['id']  # Update in case it changed
+                self.window_id = winfo['id']
                 return winfo['name']
         except Exception:
             pass
