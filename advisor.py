@@ -1,0 +1,1081 @@
+#!/usr/bin/env python3
+"""
+Chess Advisor — Stockfish 18 at MAXIMUM strength.
+Auto-detects opponent moves from Apple Chess.app via screen capture.
+100% free. No typing opponent moves — just play!
+"""
+
+import chess
+import chess.engine
+import chess.pgn
+import sys
+import os
+import re
+import time
+import io
+import subprocess
+import tempfile
+import multiprocessing
+from collections import OrderedDict
+
+# ── Screen capture imports ─────────────────────────────────────────────
+try:
+    import Quartz
+    from PIL import Image, ImageChops
+    VISION_AVAILABLE = True
+except ImportError:
+    VISION_AVAILABLE = False
+
+# ── Auto-detect system resources ───────────────────────────────────────
+CPU_COUNT = multiprocessing.cpu_count()
+ENGINE_THREADS = max(1, CPU_COUNT - 1)
+STOCKFISH_PATH = "/opt/homebrew/bin/stockfish"
+
+# ── Engine configuration — MAXED OUT ───────────────────────────────────
+ENGINE_CONFIG = {
+    "Threads": ENGINE_THREADS,
+    "Hash": 2048,
+    "Skill Level": 20,
+    "UCI_LimitStrength": False,
+    "UCI_ShowWDL": True,
+    "Ponder": False,
+    "MultiPV": 1,
+}
+
+# ── Analysis settings ──────────────────────────────────────────────────
+DEFAULT_TIME = 3.0
+CRITICAL_TIME = 8.0
+QUICK_TIME = 1.5
+NORMAL_MULTIPV = 3
+CRITICAL_MULTIPV = 5
+PV_DEPTH_DISPLAY = 8
+CACHE_MAX_SIZE = 200
+
+# ── Screen capture settings ────────────────────────────────────────────
+POLL_INTERVAL = 0.4          # Seconds between screen checks
+RENDER_SETTLE_DELAY = 0.3    # Wait for Chess.app animation to finish
+DIFF_THRESHOLD = 20          # Min avg pixel difference to count as changed
+
+# ── ANSI colors ────────────────────────────────────────────────────────
+CLEAR = "\033[2J\033[H"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+CYAN = "\033[96m"
+MAGENTA = "\033[95m"
+WHITE_FG = "\033[97m"
+BLACK_FG = "\033[30m"
+WHITE_BG = "\033[47m"
+DARK_BG = "\033[100m"
+
+PIECE_NAMES = {
+    chess.PAWN: "Pawn", chess.KNIGHT: "Knight", chess.BISHOP: "Bishop",
+    chess.ROOK: "Rook", chess.QUEEN: "Queen", chess.KING: "King",
+}
+UNICODE_PIECES = {
+    (chess.PAWN, chess.WHITE): "♙", (chess.KNIGHT, chess.WHITE): "♘",
+    (chess.BISHOP, chess.WHITE): "♗", (chess.ROOK, chess.WHITE): "♖",
+    (chess.QUEEN, chess.WHITE): "♕", (chess.KING, chess.WHITE): "♔",
+    (chess.PAWN, chess.BLACK): "♟", (chess.KNIGHT, chess.BLACK): "♞",
+    (chess.BISHOP, chess.BLACK): "♝", (chess.ROOK, chess.BLACK): "♜",
+    (chess.QUEEN, chess.BLACK): "♛", (chess.KING, chess.BLACK): "♚",
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  BOARD WATCHER — Auto-detects moves from Chess.app screen
+# ═══════════════════════════════════════════════════════════════════════
+
+class BoardWatcher:
+    """Watches Apple Chess.app and auto-detects opponent moves via screen capture."""
+
+    def __init__(self):
+        self.window_id = None
+        self.col_edges = None       # X positions of 9 column boundaries
+        self.row_top = None         # Y of top row
+        self.row_bottom = None      # Y of bottom row
+        self.scale = 1.0            # Retina scale factor
+        self.available = False
+        self.reference_image = None  # Screenshot before opponent moves
+
+    def initialize(self):
+        """Find Chess.app window and calibrate board grid."""
+        if not VISION_AVAILABLE:
+            print(f"  {YELLOW}Auto-detection unavailable (needs Pillow + Quartz){RESET}")
+            return False
+
+        # Bring Chess.app to front so we can capture it
+        try:
+            subprocess.run(['osascript', '-e', 'tell application "Chess" to activate'],
+                           capture_output=True, timeout=3)
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+        # Find Chess.app window
+        winfo = self._find_chess_window()
+        if not winfo:
+            print(f"  {YELLOW}Chess.app window not found — using manual mode{RESET}")
+            return False
+
+        self.window_id = winfo['id']
+        print(f"  {DIM}Found Chess.app (window {self.window_id}){RESET}")
+
+        # Capture and calibrate
+        img = self._capture_window()
+        if img is None:
+            print(f"  {YELLOW}Could not capture Chess.app — check Screen Recording permission{RESET}")
+            print(f"  {DIM}System Settings → Privacy & Security → Screen Recording → enable Terminal{RESET}")
+            return False
+
+        if self._calibrate_grid(img):
+            self.available = True
+            print(f"  {GREEN}Board detection calibrated — auto-detect ON{RESET}")
+            return True
+        else:
+            print(f"  {YELLOW}Could not detect board grid — using manual mode{RESET}")
+            return False
+
+    def _find_chess_window(self):
+        """Find the main Chess.app game window via Quartz. Prefers on-screen windows."""
+        try:
+            windows = Quartz.CGWindowListCopyWindowInfo(
+                Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID
+            )
+            candidates = []
+            for w in windows:
+                if w.get('kCGWindowOwnerName') != 'Chess':
+                    continue
+                name = w.get('kCGWindowName', '')
+                bounds = w.get('kCGWindowBounds', {})
+                height = bounds.get('Height', 0)
+                onscreen = w.get('kCGWindowIsOnscreen', False)
+                if 'Game' in name and height > 200:
+                    candidates.append({
+                        'id': w['kCGWindowNumber'],
+                        'name': name,
+                        'bounds': dict(bounds),
+                        'onscreen': bool(onscreen),
+                    })
+            if not candidates:
+                return None
+            # Prefer on-screen windows, then largest
+            candidates.sort(key=lambda c: (c['onscreen'], c['bounds'].get('Height', 0)), reverse=True)
+            return candidates[0]
+        except Exception:
+            return None
+
+    def _capture_window(self):
+        """Capture the Chess.app window using screencapture."""
+        if self.window_id is None:
+            return None
+        try:
+            tmp = os.path.join(tempfile.gettempdir(), 'chess_advisor_capture.png')
+            result = subprocess.run(
+                ['screencapture', '-l', str(self.window_id), '-x', '-o', tmp],
+                capture_output=True, timeout=5
+            )
+            if result.returncode != 0:
+                return None
+            img = Image.open(tmp)
+            return img
+        except Exception:
+            return None
+
+    def _is_board_pixel(self, r, g, b):
+        """Check if a pixel belongs to the chess board (not dark border/frame)."""
+        # Black/very dark = border
+        if r < 40 and g < 40 and b < 40:
+            return False
+        # Pure gray (r≈g≈b, low brightness) = window chrome
+        if abs(r - g) < 10 and abs(g - b) < 10 and r < 80:
+            return False
+        # Board squares are warm-toned (r > b typically) or bright enough
+        # Even dark board squares have r≈85-110, g≈70-95, b≈60-85
+        if r > 80 and (r - b) > 5:
+            return True
+        # Light squares are bright
+        if (r + g + b) > 300:
+            return True
+        return False
+
+    def _calibrate_grid(self, img):
+        """Detect the 8x8 board grid within the captured window image."""
+        w, h = img.size
+
+        # Find board horizontal extent by scanning along vertical center
+        cy = h // 2
+        left = right = 0
+        for x in range(w):
+            r, g, b = img.getpixel((x, cy))[:3]
+            if self._is_board_pixel(r, g, b):
+                left = x
+                break
+        for x in range(w - 1, -1, -1):
+            r, g, b = img.getpixel((x, cy))[:3]
+            if self._is_board_pixel(r, g, b):
+                right = x
+                break
+
+        if right - left < 100:
+            return False
+
+        # Find column boundaries by detecting brightness transitions
+        brightness = []
+        for x in range(left, right + 1):
+            r, g, b = img.getpixel((x, cy))[:3]
+            brightness.append((r + g + b) / 3)
+
+        win = 5
+        transitions = []
+        for i in range(win, len(brightness) - win):
+            avg_before = sum(brightness[i - win:i]) / win
+            avg_after = sum(brightness[i:i + win]) / win
+            diff = abs(avg_after - avg_before)
+            if diff > 12:
+                transitions.append((left + i, diff))
+
+        # Filter close transitions (keep strongest)
+        filtered = []
+        for x, diff in transitions:
+            if not filtered or x - filtered[-1][0] > 30:
+                filtered.append((x, diff))
+            elif diff > filtered[-1][1]:
+                filtered[-1] = (x, diff)
+
+        # Use detected transitions if we got exactly 9, otherwise estimate from board extent
+        if len(filtered) == 9:
+            self.col_edges = [x for x, _ in filtered]
+        else:
+            # Estimate uniform grid from board left/right extent
+            board_width = right - left
+            sq_w = board_width / 8
+            self.col_edges = [int(left + i * sq_w) for i in range(9)]
+
+        # Find vertical board extent
+        cx = w // 2
+        top = bottom = 0
+        for y in range(50, h):
+            r, g, b = img.getpixel((cx, y))[:3]
+            if self._is_board_pixel(r, g, b):
+                top = y
+                break
+        for y in range(h - 1, 0, -1):
+            r, g, b = img.getpixel((cx, y))[:3]
+            if self._is_board_pixel(r, g, b):
+                bottom = y
+                break
+
+        if bottom - top < 100:
+            return False
+
+        self.row_top = top
+        self.row_bottom = bottom
+        return True
+
+    def _get_square_center(self, file, rank):
+        """Get pixel coordinates for the center of a board square."""
+        # File 0=a, 7=h. Rank 0=1(bottom), 7=8(top)
+        # In the image: file goes left-to-right, rank 7 is at top
+        x = (self.col_edges[file] + self.col_edges[file + 1]) // 2
+        row_height = (self.row_bottom - self.row_top) / 8
+        # Rank 7 (row 8) is at the top of the image
+        y = int(self.row_top + (7 - rank + 0.5) * row_height)
+        return x, y
+
+    def _get_square_diff(self, img1, img2, file, rank):
+        """Compare a square between two screenshots. Returns avg pixel difference."""
+        cx, cy = self._get_square_center(file, rank)
+        sq_w = (self.col_edges[1] - self.col_edges[0]) if len(self.col_edges) > 1 else 100
+        half = max(5, int(sq_w * 0.25))
+
+        total_diff = 0
+        count = 0
+        for dy in range(-half, half + 1, 3):
+            for dx in range(-half, half + 1, 3):
+                px, py = cx + dx, cy + dy
+                if 0 <= px < img1.width and 0 <= py < img1.height:
+                    r1, g1, b1 = img1.getpixel((px, py))[:3]
+                    r2, g2, b2 = img2.getpixel((px, py))[:3]
+                    total_diff += abs(r1 - r2) + abs(g1 - g2) + abs(b1 - b2)
+                    count += 1
+
+        return total_diff / max(count, 1) / 3
+
+    def _detect_changed_squares(self, before, after):
+        """Find squares that changed between two screenshots."""
+        changed = []
+        for rank in range(8):
+            for file in range(8):
+                diff = self._get_square_diff(before, after, file, rank)
+                if diff > DIFF_THRESHOLD:
+                    changed.append((file, rank, diff))
+        changed.sort(key=lambda x: -x[2])
+        return changed
+
+    def _deduce_move(self, changed_squares, board):
+        """From changed squares and known board state, find the matching legal move."""
+        if len(changed_squares) < 2:
+            return None
+
+        changed_set = {chess.square(f, r) for f, r, _ in changed_squares}
+
+        best_match = None
+        best_score = -1
+
+        for move in board.legal_moves:
+            affected = {move.from_square, move.to_square}
+
+            if board.is_castling(move):
+                rank = chess.square_rank(move.from_square)
+                if board.is_kingside_castling(move):
+                    affected.update({chess.square(7, rank), chess.square(5, rank)})
+                else:
+                    affected.update({chess.square(0, rank), chess.square(3, rank)})
+
+            if board.is_en_passant(move):
+                cap_sq = chess.square(chess.square_file(move.to_square),
+                                     chess.square_rank(move.from_square))
+                affected.add(cap_sq)
+
+            # Score: how many affected squares are in the changed set
+            overlap = len(affected & changed_set)
+            # Penalize if many changed squares are NOT in affected (noise)
+            noise = len(changed_set - affected)
+            score = overlap * 10 - noise
+
+            if overlap >= len(affected) and score > best_score:
+                best_score = score
+                best_match = move
+
+        return best_match
+
+    def get_window_title(self):
+        """Get the current window title to detect whose turn it is."""
+        try:
+            winfo = self._find_chess_window()
+            if winfo:
+                self.window_id = winfo['id']  # Update in case it changed
+                return winfo['name']
+        except Exception:
+            pass
+        return None
+
+    def is_turn(self, color):
+        """Check if it's a specific color's turn based on window title."""
+        title = self.get_window_title()
+        if title is None:
+            return None
+        if color == chess.WHITE:
+            return 'White to Move' in title
+        else:
+            return 'Black to Move' in title
+
+    def take_reference(self):
+        """Take a reference screenshot (before opponent moves)."""
+        self.reference_image = self._capture_window()
+
+    def wait_for_opponent_move(self, board, playing_as):
+        """
+        Poll Chess.app until the opponent moves, then detect what move was made.
+        Returns the detected chess.Move, or None if detection fails.
+        """
+        if not self.available:
+            return None
+
+        # Take reference screenshot if we don't have one
+        if self.reference_image is None:
+            self.reference_image = self._capture_window()
+
+        my_turn_str = 'White to Move' if playing_as == chess.WHITE else 'Black to Move'
+        dots = 0
+
+        while True:
+            time.sleep(POLL_INTERVAL)
+
+            title = self.get_window_title()
+            if title is None:
+                # Chess.app might have closed
+                return None
+
+            # Check if it's our turn now (opponent finished)
+            if my_turn_str in title:
+                # Wait for animation to settle
+                time.sleep(RENDER_SETTLE_DELAY)
+
+                # Capture the new board state
+                after = self._capture_window()
+                if after is None:
+                    return None
+
+                before = self.reference_image
+
+                # Detect changed squares
+                changed = self._detect_changed_squares(before, after)
+                if changed:
+                    move = self._deduce_move(changed, board)
+                    if move:
+                        self.reference_image = None  # Reset for next cycle
+                        return move
+
+                # If detection failed, try once more with a longer settle
+                time.sleep(0.5)
+                after = self._capture_window()
+                if after:
+                    changed = self._detect_changed_squares(before, after)
+                    if changed:
+                        move = self._deduce_move(changed, board)
+                        if move:
+                            self.reference_image = None
+                            return move
+
+                # Detection failed
+                self.reference_image = None
+                return None
+
+            # Still opponent's turn — show waiting dots
+            dots = (dots + 1) % 4
+            sys.stdout.write(f"\r  {DIM}Watching Chess.app{'.' * dots}{'   '}{RESET}")
+            sys.stdout.flush()
+
+            # Check for game over in title
+            if 'Checkmate' in title or 'Draw' in title or 'Stalemate' in title:
+                return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  LRU CACHE
+# ═══════════════════════════════════════════════════════════════════════
+
+class LRUCache:
+    """Simple LRU cache with bounded size."""
+
+    def __init__(self, max_size=CACHE_MAX_SIZE):
+        self._cache = OrderedDict()
+        self._max_size = max_size
+
+    def get(self, key):
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        return None
+
+    def put(self, key, value):
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        else:
+            if len(self._cache) >= self._max_size:
+                self._cache.popitem(last=False)
+        self._cache[key] = value
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  CHESS ADVISOR — Main engine
+# ═══════════════════════════════════════════════════════════════════════
+
+class ChessAdvisor:
+    """Maximum-strength chess advisor powered by Stockfish 18."""
+
+    def __init__(self):
+        self.board = chess.Board()
+        self.engine = None
+        self.playing_as = chess.WHITE
+        self.player_name = "Player"
+        self.analysis_cache = LRUCache()
+        self.game_pgn = chess.pgn.Game()
+        self.pgn_node = self.game_pgn
+        self.last_eval = None
+        self.watcher = BoardWatcher()
+        self.auto_detect = False
+
+    def start_engine(self):
+        self.engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
+        self.engine.configure(ENGINE_CONFIG)
+
+    def stop_engine(self):
+        if self.engine:
+            self.engine.quit()
+            self.engine = None
+
+    # ── Analysis ───────────────────────────────────────────────────────
+
+    def is_critical_position(self):
+        if self.board.is_check():
+            return True
+        if len(self.board.move_stack) < 6:
+            return False
+        our_king = self.board.king(self.playing_as)
+        their_king = self.board.king(not self.playing_as)
+        if our_king is not None and len(self.board.attackers(not self.playing_as, our_king)) > 0:
+            return True
+        if their_king is not None and len(self.board.attackers(self.playing_as, their_king)) > 0:
+            return True
+        if len(self.board.piece_map()) <= 10:
+            return True
+        if sum(1 for m in self.board.legal_moves if self.board.is_capture(m)) >= 4:
+            return True
+        return False
+
+    def analyze_position(self, multipv=NORMAL_MULTIPV, think_time=None):
+        fen = self.board.fen()
+        cache_key = (fen, multipv, think_time)
+        cached = self.analysis_cache.get(cache_key)
+        if cached is not None:
+            return cached, False
+
+        critical = self.is_critical_position()
+        if think_time is None:
+            think_time = CRITICAL_TIME if critical else DEFAULT_TIME
+
+        result = self.engine.analyse(
+            self.board,
+            chess.engine.Limit(time=think_time),
+            multipv=multipv,
+        )
+        self.analysis_cache.put(cache_key, result)
+        return result, critical
+
+    def extract_threats_from_pv(self, results):
+        threats = []
+        for info in results[:3]:
+            pv = info.get("pv", [])
+            if len(pv) >= 2:
+                our_move, their_reply = pv[0], pv[1]
+                temp = self.board.copy()
+                temp.push(our_move)
+                if temp.is_capture(their_reply):
+                    captured = temp.piece_at(their_reply.to_square)
+                    if captured and captured.piece_type in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT):
+                        threats.append(("capture", their_reply, captured))
+                temp.push(their_reply)
+                if temp.is_check():
+                    threats.append(("check_after", their_reply, None))
+        return threats[:5]
+
+    def get_game_phase(self):
+        piece_count = len(self.board.piece_map())
+        queens = len(self.board.pieces(chess.QUEEN, chess.WHITE)) + \
+                 len(self.board.pieces(chess.QUEEN, chess.BLACK))
+        move_num = self.board.fullmove_number
+        if move_num <= 10 and piece_count >= 28:
+            return "Opening"
+        elif piece_count <= 12 or (queens == 0 and piece_count <= 16):
+            return "Endgame"
+        return "Middlegame"
+
+    def get_material_balance(self):
+        values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+                  chess.ROOK: 5, chess.QUEEN: 9}
+        white_mat = black_mat = 0
+        for p in self.board.piece_map().values():
+            v = values.get(p.piece_type, 0)
+            if p.color == chess.WHITE:
+                white_mat += v
+            else:
+                black_mat += v
+        return (white_mat - black_mat) if self.playing_as == chess.WHITE else (black_mat - white_mat)
+
+    # ── Display ────────────────────────────────────────────────────────
+
+    def render_board(self, highlight_from=None, highlight_to=None):
+        lines = ["",
+                 "     a   b   c   d   e   f   g   h",
+                 "   ╔═══╤═══╤═══╤═══╤═══╤═══╤═══╤═══╗"]
+        ranks = range(7, -1, -1) if self.playing_as == chess.WHITE else range(8)
+        files_list = list(range(8) if self.playing_as == chess.WHITE else range(7, -1, -1))
+        last_file = files_list[-1]
+        rank_list = list(ranks)
+        for idx, rank in enumerate(rank_list):
+            row = f" {rank+1} ║"
+            for file in files_list:
+                sq = chess.square(file, rank)
+                piece = self.board.piece_at(sq)
+                is_light = (rank + file) % 2 == 1
+                if sq == highlight_from:
+                    bg = "\033[43m"
+                elif sq == highlight_to:
+                    bg = "\033[42m"
+                elif is_light:
+                    bg = WHITE_BG
+                else:
+                    bg = DARK_BG
+                if piece:
+                    symbol = UNICODE_PIECES.get((piece.piece_type, piece.color), "?")
+                    fg = WHITE_FG if piece.color == chess.WHITE else BLACK_FG
+                    row += f"{bg}{fg} {symbol} {RESET}"
+                else:
+                    row += f"{bg}   {RESET}"
+                if file != last_file:
+                    row += "│"
+            row += f"║ {rank+1}"
+            lines.append(row)
+            if idx < len(rank_list) - 1:
+                lines.append("   ╟───┼───┼───┼───┼───┼───┼───┼───╢")
+        lines += ["   ╚═══╧═══╧═══╧═══╧═══╧═══╧═══╧═══╝",
+                   "     a   b   c   d   e   f   g   h", ""]
+        return "\n".join(lines)
+
+    def eval_bar(self, score, width=30):
+        if score.is_mate():
+            m = score.mate()
+            return f"{GREEN}{'█' * width} MATE in {m}{RESET}" if m > 0 else f"{RED}{'░' * width} MATED in {abs(m)}{RESET}"
+        cp = score.score() or 0
+        clamped = max(-1000, min(1000, cp))
+        bar_pos = max(0, min(width, int((clamped + 1000) / 2000 * width)))
+        bar = f"{GREEN}{'█' * bar_pos}{RESET}{DIM}{'░' * (width - bar_pos)}{RESET}"
+        if cp > 300:     label = f"{GREEN}{BOLD}+{cp/100:.2f} (winning){RESET}"
+        elif cp > 100:   label = f"{GREEN}+{cp/100:.2f} (better){RESET}"
+        elif cp > 30:    label = f"{GREEN}+{cp/100:.2f} (slight edge){RESET}"
+        elif cp >= -30:  label = f"{YELLOW}{cp/100:+.2f} (equal){RESET}"
+        elif cp >= -100: label = f"{RED}{cp/100:+.2f} (slightly worse){RESET}"
+        elif cp >= -300: label = f"{RED}{cp/100:+.2f} (worse){RESET}"
+        else:            label = f"{RED}{BOLD}{cp/100:+.2f} (losing){RESET}"
+        return f"{bar} {label}"
+
+    def wdl_str(self, wdl):
+        if wdl is None:
+            return ""
+        w, d, l = wdl
+        total = w + d + l
+        if total == 0:
+            return ""
+        return (f"  {GREEN}Win: {w/total*100:.1f}%{RESET}  "
+                f"{YELLOW}Draw: {d/total*100:.1f}%{RESET}  "
+                f"{RED}Loss: {l/total*100:.1f}%{RESET}")
+
+    def describe_move(self, move):
+        piece = self.board.piece_at(move.from_square)
+        captured = self.board.piece_at(move.to_square)
+        from_sq = chess.square_name(move.from_square)
+        to_sq = chess.square_name(move.to_square)
+        piece_name = PIECE_NAMES.get(piece.piece_type, "?") if piece else "?"
+        if self.board.is_castling(move):
+            side = "kingside (O-O)" if self.board.is_kingside_castling(move) else "queenside (O-O-O)"
+            return f"Castle {side} — King {from_sq}→{to_sq}, Rook moves inside"
+        desc = f"{piece_name} {from_sq} → {to_sq}"
+        if captured:
+            desc += f" ×{PIECE_NAMES.get(captured.piece_type, '?')}"
+        if self.board.is_en_passant(move):
+            desc += " (en passant)"
+        if move.promotion:
+            desc += f" ={PIECE_NAMES.get(move.promotion, '?')}"
+        self.board.push(move)
+        if self.board.is_checkmate():
+            desc += " CHECKMATE!"
+        elif self.board.is_check():
+            desc += " CHECK!"
+        self.board.pop()
+        return desc
+
+    def format_pv(self, pv, max_moves=PV_DEPTH_DISPLAY):
+        temp = self.board.copy()
+        parts = []
+        for i, move in enumerate(pv[:max_moves]):
+            if temp.turn == chess.WHITE:
+                parts.append(f"{temp.fullmove_number}.")
+            elif i == 0:
+                parts.append(f"{temp.fullmove_number}...")
+            parts.append(temp.san(move))
+            temp.push(move)
+        return " ".join(parts)
+
+    def render_header(self):
+        mn = self.board.fullmove_number
+        color = "WHITE" if self.playing_as == chess.WHITE else "BLACK"
+        phase = self.get_game_phase()
+        mat = self.get_material_balance()
+        mat_str = f"+{mat}" if mat > 0 else str(mat)
+        detect = "AUTO" if self.auto_detect else "MANUAL"
+        return "\n".join([
+            CLEAR,
+            f"{BOLD}╔══════════════════════════════════════════════════════════╗{RESET}",
+            f"{BOLD}║  ♚ CHESS ADVISOR — Stockfish 18 · MAXIMUM STRENGTH ♚   ║{RESET}",
+            f"{BOLD}╠══════════════════════════════════════════════════════════╣{RESET}",
+            f"{BOLD}║{RESET}  {ENGINE_THREADS} cores │ 2GB hash │ NNUE │ Detection: {detect:6s}       {BOLD}║{RESET}",
+            f"{BOLD}╠══════════════════════════════════════════════════════════╣{RESET}",
+            f"{BOLD}║{RESET}  Playing: {BOLD}{color}{RESET}  │  Move: {mn}  │  Phase: {phase}  │  Material: {mat_str:>3}  {BOLD}║{RESET}",
+            f"{BOLD}╚══════════════════════════════════════════════════════════╝{RESET}",
+        ])
+
+    # ── Move parsing ───────────────────────────────────────────────────
+
+    def parse_move(self, move_str):
+        move_str = move_str.strip()
+        try:
+            return self.board.parse_san(move_str)
+        except (chess.InvalidMoveError, chess.IllegalMoveError, chess.AmbiguousMoveError):
+            pass
+        try:
+            m = chess.Move.from_uci(move_str)
+            if m in self.board.legal_moves:
+                return m
+        except (chess.InvalidMoveError, ValueError):
+            pass
+        for san_str, variants in [("O-O", ("OO", "0-0", "O-O", "0O")),
+                                   ("O-O-O", ("OOO", "0-0-0", "O-O-O", "00O"))]:
+            if move_str.upper() in variants:
+                try:
+                    return self.board.parse_san(san_str)
+                except (chess.InvalidMoveError, chess.IllegalMoveError):
+                    pass
+        return None
+
+    # ── PGN ────────────────────────────────────────────────────────────
+
+    def export_pgn(self):
+        self.game_pgn.headers["Event"] = "Chess Advisor Session"
+        if self.playing_as == chess.WHITE:
+            self.game_pgn.headers["White"] = self.player_name
+            self.game_pgn.headers["Black"] = "Computer"
+        else:
+            self.game_pgn.headers["White"] = "Computer"
+            self.game_pgn.headers["Black"] = self.player_name
+        self.game_pgn.headers["Result"] = self.board.result() if self.board.is_game_over() else "*"
+        return self.game_pgn.accept(chess.pgn.StringExporter(headers=True, variations=False, comments=True))
+
+    def save_pgn(self):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, "game.pgn")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(self.export_pgn())
+        return path
+
+    # ── Turn handlers ──────────────────────────────────────────────────
+
+    def my_turn(self):
+        """Analyze position and recommend the best move."""
+        out = [f"  {GREEN}{BOLD}══════ YOUR TURN ══════{RESET}"]
+
+        critical = self.is_critical_position()
+        mpv = CRITICAL_MULTIPV if critical else NORMAL_MULTIPV
+
+        sys.stdout.write(f"  {DIM}Deep analysis ({ENGINE_THREADS} threads, adaptive)...{RESET}")
+        sys.stdout.flush()
+        start = time.time()
+        results, _ = self.analyze_position(multipv=mpv)
+        elapsed = time.time() - start
+        sys.stdout.write(f"\r{'':60}\r")
+        sys.stdout.flush()
+
+        if critical:
+            out.append(f"  {RED}{BOLD}⚠ CRITICAL POSITION — Extended analysis ({elapsed:.1f}s){RESET}")
+        else:
+            out.append(f"  {DIM}Analysis complete ({elapsed:.1f}s){RESET}")
+
+        best = results[0]
+        score = best["score"].white() if self.playing_as == chess.WHITE else best["score"].black()
+        out.append(f"\n  {BOLD}Eval:{RESET} {self.eval_bar(score)}")
+
+        wdl = best.get("wdl")
+        if wdl:
+            oriented = wdl if self.playing_as == chess.WHITE else (wdl[2], wdl[1], wdl[0])
+            out.append(self.wdl_str(oriented))
+
+        threats = self.extract_threats_from_pv(results)
+        if threats:
+            out.append(f"\n  {RED}{BOLD}Threats to watch:{RESET}")
+            for ttype, tmove, tpiece in threats[:3]:
+                if ttype == "capture" and tpiece:
+                    out.append(f"    {YELLOW}⚠ {PIECE_NAMES.get(tpiece.piece_type, '?')} on {chess.square_name(tmove.to_square)} attacked{RESET}")
+                elif ttype == "check_after":
+                    out.append(f"    {YELLOW}⚠ Check threat after {chess.square_name(tmove.to_square)}{RESET}")
+
+        out.append(f"\n  {BOLD}{'─'*52}{RESET}")
+        out.append(f"  {BOLD}Top {len(results)} candidate moves:{RESET}\n")
+
+        best_move = results[0]["pv"][0]
+        best_san = self.board.san(best_move)
+        best_desc = None
+
+        for i, info in enumerate(results):
+            move = info["pv"][0]
+            mv_score = info["score"].white() if self.playing_as == chess.WHITE else info["score"].black()
+            desc = self.describe_move(move)
+            san = self.board.san(move)
+            pv_str = self.format_pv(info["pv"])
+            depth = info.get("depth", "?")
+            if mv_score.is_mate():
+                m = mv_score.mate()
+                sc = f"M{abs(m)}" if m > 0 else f"-M{abs(m)}"
+            else:
+                sc = f"{(mv_score.score() or 0)/100:+.2f}"
+            if i == 0:
+                best_desc = desc
+                out.append(f"  {GREEN}{BOLD}▶ #{i+1} {san:8s} [{sc:>7}] d{depth}{RESET}")
+                out.append(f"    {GREEN}{desc}{RESET}")
+                out.append(f"    {DIM}Line: {pv_str}{RESET}")
+            else:
+                out.append(f"  {DIM}  #{i+1} {san:8s} [{sc:>7}] d{depth} — {desc}{RESET}")
+                if len(info["pv"]) > 1:
+                    out.append(f"    {DIM}   Line: {pv_str}{RESET}")
+
+        out.append(f"\n  {BOLD}{'─'*52}{RESET}")
+        out.append(f"  {GREEN}{BOLD}➤ PLAY: {best_san}{RESET}")
+        out.append(f"  {GREEN}{BOLD}  {best_desc}{RESET}")
+        out.append(f"  {BOLD}{'─'*52}{RESET}")
+        print("\n".join(out))
+
+        eval_before = score
+
+        while True:
+            prompt = f"\n  Make this move in Chess.app, then press Enter"
+            if not self.auto_detect:
+                prompt = f"\n  Your move (Enter={best_san}, 'q'=quit, 'undo', 'save')"
+            user_input = input(f"{prompt}: ").strip()
+
+            if user_input == "":
+                self.board.push(best_move)
+                self.pgn_node = self.pgn_node.add_variation(best_move)
+                self.last_eval = eval_before
+                # Take reference screenshot AFTER our move for the next detection cycle
+                if self.auto_detect:
+                    time.sleep(0.3)  # Let Chess.app animate our move
+                    self.watcher.take_reference()
+                return eval_before
+            elif user_input.lower() == 'q':
+                raise KeyboardInterrupt
+            elif user_input.lower() == 'undo':
+                if len(self.board.move_stack) >= 2:
+                    self.board.pop()
+                    self.board.pop()
+                    print(f"  {YELLOW}Undid last 2 moves.{RESET}")
+                    return None
+                else:
+                    print(f"  {RED}Nothing to undo.{RESET}")
+            elif user_input.lower() == 'save':
+                print(f"  {GREEN}Game saved to {self.save_pgn()}{RESET}")
+            elif user_input.lower() == 'pgn':
+                print(f"\n{self.export_pgn()}\n")
+            elif user_input.lower() == 'fen':
+                print(f"\n  FEN: {self.board.fen()}\n")
+            else:
+                parsed = self.parse_move(user_input)
+                if parsed:
+                    self.board.push(parsed)
+                    self.pgn_node = self.pgn_node.add_variation(parsed)
+                    self.last_eval = eval_before
+                    if self.auto_detect:
+                        time.sleep(0.3)
+                        self.watcher.take_reference()
+                    return eval_before
+                else:
+                    legal = [self.board.san(m) for m in self.board.legal_moves]
+                    close = [m for m in legal if m.lower().startswith(user_input.lower()[:2])]
+                    hint = f" Did you mean: {', '.join(close[:5])}?" if close else ""
+                    print(f"  {RED}Invalid move.{hint}{RESET}")
+
+    def opponent_turn(self):
+        """Wait for opponent's move — auto-detect or manual input."""
+        out = [f"  {YELLOW}{BOLD}══════ OPPONENT'S TURN ══════{RESET}"]
+
+        sys.stdout.write(f"  {DIM}Predicting opponent's move...{RESET}")
+        sys.stdout.flush()
+        results, _ = self.analyze_position(multipv=3, think_time=QUICK_TIME)
+        sys.stdout.write(f"\r{'':50}\r")
+        sys.stdout.flush()
+
+        score = results[0]["score"].white() if self.playing_as == chess.WHITE else results[0]["score"].black()
+        out.append(f"\n  {BOLD}Eval:{RESET} {self.eval_bar(score)}")
+
+        wdl = results[0].get("wdl")
+        if wdl:
+            oriented = wdl if self.playing_as == chess.WHITE else (wdl[2], wdl[1], wdl[0])
+            out.append(self.wdl_str(oriented))
+
+        out.append(f"\n  {BOLD}Predicted opponent moves:{RESET}")
+        for i, info in enumerate(results[:3]):
+            move = info["pv"][0]
+            san = self.board.san(move)
+            pv_str = self.format_pv(info["pv"])
+            if i == 0:
+                out.append(f"    {CYAN}Most likely: {san}{RESET}")
+                out.append(f"    {DIM}Continuation: {pv_str}{RESET}")
+            else:
+                out.append(f"    {DIM}Also possible: {san}{RESET}")
+
+        print("\n".join(out))
+
+        # ── Auto-detect mode ──────────────────────────────────────────
+        if self.auto_detect:
+            print(f"\n  {CYAN}{BOLD}Watching Chess.app for opponent's move...{RESET}")
+            detected_move = self.watcher.wait_for_opponent_move(self.board, self.playing_as)
+
+            if detected_move:
+                san = self.board.san(detected_move)
+                desc = self.describe_move(detected_move)
+                self.board.push(detected_move)
+                self.pgn_node = self.pgn_node.add_variation(detected_move)
+                print(f"\r  {BOLD}Opponent played: {san}{RESET} — {desc}")
+                return score
+            else:
+                # Fall back to manual for this move
+                print(f"\r  {YELLOW}Could not auto-detect — enter move manually{RESET}")
+
+        # ── Manual input (fallback or default) ────────────────────────
+        while True:
+            user_input = input(f"\n  Opponent's move: ").strip()
+            if user_input.lower() == 'q':
+                raise KeyboardInterrupt
+            elif user_input.lower() == 'undo':
+                if len(self.board.move_stack) >= 2:
+                    self.board.pop()
+                    self.board.pop()
+                    print(f"  {YELLOW}Undid last 2 moves.{RESET}")
+                    return None
+                else:
+                    print(f"  {RED}Nothing to undo.{RESET}")
+            elif user_input.lower() == 'save':
+                print(f"  {GREEN}Game saved to {self.save_pgn()}{RESET}")
+            else:
+                parsed = self.parse_move(user_input)
+                if parsed:
+                    san = self.board.san(parsed)
+                    self.board.push(parsed)
+                    self.pgn_node = self.pgn_node.add_variation(parsed)
+                    print(f"  Opponent played: {BOLD}{san}{RESET}")
+                    return score
+                else:
+                    legal = [self.board.san(m) for m in self.board.legal_moves]
+                    close = [m for m in legal if m.lower().startswith(user_input.lower()[:2])]
+                    hint = f" Did you mean: {', '.join(close[:5])}?" if close else ""
+                    print(f"  {RED}Invalid move.{hint}{RESET}")
+
+    # ── Main loop ──────────────────────────────────────────────────────
+
+    def run(self):
+        print(f"{CLEAR}", end="")
+        detect_label = "AUTO-DETECT" if VISION_AVAILABLE else "MANUAL"
+        banner = [
+            f"{BOLD}╔══════════════════════════════════════════════════════════╗{RESET}",
+            f"{BOLD}║  ♚ CHESS ADVISOR — Stockfish 18 · MAXIMUM STRENGTH ♚   ║{RESET}",
+            f"{BOLD}╠══════════════════════════════════════════════════════════╣{RESET}",
+            f"{BOLD}║{RESET}                                                          {BOLD}║{RESET}",
+            f"{BOLD}║{RESET}  The world's strongest chess engine, tuned to the max.   {BOLD}║{RESET}",
+            f"{BOLD}║{RESET}  {ENGINE_THREADS} CPU threads · 2GB hash · NNUE neural net · Adaptive {BOLD}║{RESET}",
+            f"{BOLD}║{RESET}  Screen capture auto-detection of opponent moves          {BOLD}║{RESET}",
+            f"{BOLD}║{RESET}  Just play your move — the advisor sees the rest!         {BOLD}║{RESET}",
+            f"{BOLD}║{RESET}                                                          {BOLD}║{RESET}",
+            f"{BOLD}╚══════════════════════════════════════════════════════════╝{RESET}",
+            "",
+        ]
+        print("\n".join(banner))
+
+        # Player name
+        name_input = input(f"  Your name (Enter=Player): ").strip()[:50]
+        if name_input:
+            self.player_name = name_input
+
+        # Color selection
+        while True:
+            color_input = input(f"  Are you playing as White or Black? (w/b): ").strip().lower()
+            if color_input in ('w', 'white'):
+                self.playing_as = chess.WHITE
+                break
+            elif color_input in ('b', 'black'):
+                self.playing_as = chess.BLACK
+                break
+            print(f"  {RED}Enter 'w' or 'b'{RESET}")
+
+        # Resume existing game
+        print(f"\n  {DIM}Resume a game? Enter moves (space-separated) or press Enter.{RESET}")
+        existing = input(f"  Moves: ").strip()
+        if existing:
+            try:
+                pgn_io = io.StringIO(existing)
+                game = chess.pgn.read_game(pgn_io)
+                if game:
+                    for move in game.mainline_moves():
+                        self.board.push(move)
+                        self.pgn_node = self.pgn_node.add_variation(move)
+                else:
+                    raise ValueError()
+            except Exception:
+                for m in existing.split():
+                    if re.match(r'^\d+\.+$', m):
+                        continue
+                    parsed = self.parse_move(m)
+                    if parsed:
+                        self.board.push(parsed)
+                        self.pgn_node = self.pgn_node.add_variation(parsed)
+                    else:
+                        safe_m = re.sub(r'[^\x20-\x7e]', '', m)
+                        print(f"  {RED}Couldn't parse '{safe_m}', stopping here.{RESET}")
+                        break
+
+        # Initialize auto-detection
+        print()
+        if VISION_AVAILABLE:
+            print(f"  {DIM}Connecting to Chess.app for auto-detection...{RESET}")
+            self.auto_detect = self.watcher.initialize()
+            if not self.auto_detect:
+                print(f"  {DIM}Falling back to manual mode (type opponent moves).{RESET}")
+        else:
+            print(f"  {YELLOW}Auto-detect unavailable. Install: pip3 install Pillow{RESET}")
+            print(f"  {DIM}Using manual mode (type opponent moves).{RESET}")
+
+        # Start engine
+        print(f"\n  {DIM}Initializing Stockfish 18 (max settings)...{RESET}")
+        self.start_engine()
+        print(f"  {GREEN}{BOLD}Engine ready — {ENGINE_THREADS} threads, 2GB hash, NNUE active{RESET}")
+
+        mode_str = f"{GREEN}AUTO-DETECT{RESET}" if self.auto_detect else f"{YELLOW}MANUAL{RESET}"
+        print(f"  Opponent detection: {mode_str}\n")
+
+        try:
+            while not self.board.is_game_over():
+                is_my_turn = (self.board.turn == self.playing_as)
+                hl_from = hl_to = None
+                if self.board.move_stack:
+                    last = self.board.peek()
+                    hl_from, hl_to = last.from_square, last.to_square
+
+                print(self.render_header() + self.render_board(
+                    highlight_from=hl_from, highlight_to=hl_to))
+
+                result = self.my_turn() if is_my_turn else self.opponent_turn()
+                if result is None:
+                    continue
+
+            # Game over
+            hl_from = hl_to = None
+            if self.board.move_stack:
+                last = self.board.peek()
+                hl_from, hl_to = last.from_square, last.to_square
+            print(self.render_header() + self.render_board(
+                highlight_from=hl_from, highlight_to=hl_to))
+
+            print(f"  {BOLD}{'═'*52}{RESET}")
+            if self.board.is_checkmate():
+                winner_white = self.board.turn == chess.BLACK
+                i_won = (winner_white and self.playing_as == chess.WHITE) or \
+                        (not winner_white and self.playing_as == chess.BLACK)
+                if i_won:
+                    print(f"  {GREEN}{BOLD}  CHECKMATE — YOU WIN!  {RESET}")
+                else:
+                    print(f"  {RED}{BOLD}  CHECKMATE — You lost.  {RESET}")
+            elif self.board.is_stalemate():
+                print(f"  {YELLOW}Stalemate — draw.{RESET}")
+            elif self.board.is_insufficient_material():
+                print(f"  {YELLOW}Draw — insufficient material.{RESET}")
+            elif self.board.is_fifty_moves():
+                print(f"  {YELLOW}Draw — fifty-move rule.{RESET}")
+            elif self.board.is_repetition():
+                print(f"  {YELLOW}Draw — threefold repetition.{RESET}")
+            else:
+                print(f"  Game over: {self.board.result()}")
+            print(f"  {BOLD}{'═'*52}{RESET}")
+            print(f"\n  Game saved to {self.save_pgn()}")
+
+        except KeyboardInterrupt:
+            print(f"\n\n  {DIM}Session ended.{RESET}")
+            print(f"  Game saved to {self.save_pgn()}\n")
+        finally:
+            self.stop_engine()
+
+
+if __name__ == "__main__":
+    ChessAdvisor().run()
