@@ -21,7 +21,7 @@ from collections import OrderedDict
 # ── Screen capture imports ─────────────────────────────────────────────
 try:
     import Quartz
-    from PIL import Image, ImageChops
+    from PIL import Image
     VISION_AVAILABLE = True
 except ImportError:
     VISION_AVAILABLE = False
@@ -38,7 +38,6 @@ ENGINE_CONFIG = {
     "Skill Level": 20,
     "UCI_LimitStrength": False,
     "UCI_ShowWDL": True,
-    "Ponder": False,
     "MultiPV": 1,
 }
 
@@ -172,41 +171,59 @@ class BoardWatcher:
         """Capture the Chess.app window using screencapture. Cleans up temp file."""
         if self.window_id is None:
             return None
+        tmp = None
         try:
             fd, tmp = tempfile.mkstemp(suffix='.png', prefix='chess_adv_')
             os.close(fd)
             result = subprocess.run(
-                ['screencapture', '-l', str(self.window_id), '-x', '-o', tmp],
+                ['screencapture', '-l', str(self.window_id), '-x', '-o', '-t', 'png', tmp],
                 capture_output=True, timeout=5
             )
             if result.returncode != 0:
                 os.unlink(tmp)
                 return None
             img = Image.open(tmp)
-            img.load()  # Load pixels into memory so we can delete the file
+            img.load()
             os.unlink(tmp)
+            # Detect blank/black images (macOS returns black for background windows)
+            pixels = img.load()
+            w, h = img.size
+            non_black = 0
+            for sy in range(h // 4, h * 3 // 4, h // 8):
+                for sx in range(w // 4, w * 3 // 4, w // 8):
+                    r, g, b = pixels[sx, sy][:3]
+                    if r > 10 or g > 10 or b > 10:
+                        non_black += 1
+            if non_black == 0:
+                return None  # All-black image = window not rendered
             return img
         except Exception:
             try:
-                os.unlink(tmp)
+                if tmp:
+                    os.unlink(tmp)
             except Exception:
                 pass
             return None
 
     def _is_board_pixel(self, r, g, b):
-        """Check if a pixel belongs to the chess board (not dark border/frame)."""
-        # Black/very dark = border
-        if r < 40 and g < 40 and b < 40:
+        """Check if pixel is a board square. Supports Wood, Marble, Metal themes."""
+        # Black/very dark = window border or background
+        if r < 30 and g < 30 and b < 30:
             return False
-        # Pure gray (r≈g≈b, low brightness) = window chrome
-        if abs(r - g) < 10 and abs(g - b) < 10 and r < 80:
+        # Pure gray window chrome (neutral, low brightness)
+        if abs(r - g) < 8 and abs(g - b) < 8 and r < 60:
             return False
-        # Board squares are warm-toned (r > b typically) or bright enough
-        # Even dark board squares have r≈85-110, g≈70-95, b≈60-85
-        if r > 80 and (r - b) > 5:
+        # Liquid Glass translucent toolbar (semi-transparent gray)
+        if abs(r - g) < 12 and abs(g - b) < 12 and 60 <= r <= 180:
+            return False
+        # Wood theme: warm tones
+        if r > 70 and (r - b) > 10:
             return True
-        # Light squares are bright
-        if (r + g + b) > 300:
+        # Marble theme: bright/white-ish
+        if (r + g + b) > 280:
+            return True
+        # Metal theme: blue/silver tones
+        if r > 60 and g > 60 and b > 60 and (r + g + b) > 200:
             return True
         return False
 
@@ -418,8 +435,10 @@ class BoardWatcher:
 
         my_turn_str = 'White to Move' if playing_as == chess.WHITE else 'Black to Move'
         dots = 0
+        max_wait = 600  # 10 minute timeout
+        waited = 0
 
-        while True:
+        while waited < max_wait:
             time.sleep(POLL_INTERVAL)
 
             title = self.get_window_title()
@@ -462,14 +481,19 @@ class BoardWatcher:
                 self.reference_image = None
                 return None
 
+            # Check for game over in title
+            if 'Checkmate' in title or 'Draw' in title or 'Stalemate' in title:
+                return None
+
             # Still opponent's turn — show waiting dots
+            waited += POLL_INTERVAL
             dots = (dots + 1) % 4
             sys.stdout.write(f"\r  {DIM}Watching Chess.app{'.' * dots}{'   '}{RESET}")
             sys.stdout.flush()
 
-            # Check for game over in title
-            if 'Checkmate' in title or 'Draw' in title or 'Stalemate' in title:
-                return None
+        # Timeout
+        self.reference_image = None
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -523,7 +547,10 @@ class ChessAdvisor:
 
     def stop_engine(self):
         if self.engine:
-            self.engine.quit()
+            try:
+                self.engine.quit()
+            except Exception:
+                pass
             self.engine = None
 
     # ── Analysis ───────────────────────────────────────────────────────

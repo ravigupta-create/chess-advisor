@@ -8,9 +8,11 @@ Tracks game state automatically via Chess.app screen capture.
 
 import chess
 import chess.engine
+import chess.pgn
 import sys
 import os
 import re
+import io
 import time
 import subprocess
 import tempfile
@@ -44,13 +46,16 @@ PIECE_NAMES = {
 
 def notify(title, message):
     """Show macOS notification."""
-    # Escape for AppleScript
-    t = title.replace('"', '\\"').replace("'", "'")
-    m = message.replace('"', '\\"').replace("'", "'")
-    subprocess.run([
-        'osascript', '-e',
-        f'display notification "{m}" with title "{t}" sound name "Pop"'
-    ], capture_output=True, timeout=5)
+    # Escape for AppleScript string literals
+    t = title.replace('\\', '\\\\').replace('"', '\\"')
+    m = message.replace('\\', '\\\\').replace('"', '\\"')
+    try:
+        subprocess.run([
+            'osascript', '-e',
+            f'display notification "{m}" with title "{t}" sound name "Pop"'
+        ], capture_output=True, timeout=5)
+    except Exception:
+        pass
 
 
 def say(text):
@@ -77,7 +82,7 @@ class BoardReader:
         self.tracking = False   # Whether we're tracking a game
 
     def find_window(self):
-        """Find Chess.app window."""
+        """Find Chess.app window. Prefers on-screen windows, then largest."""
         if not VISION:
             return False
         try:
@@ -91,11 +96,12 @@ class BoardReader:
                 name = w.get('kCGWindowName', '')
                 bounds = w.get('kCGWindowBounds', {})
                 height = bounds.get('Height', 0)
+                onscreen = bool(w.get('kCGWindowIsOnscreen', False))
                 if 'Game' in name and height > 200:
-                    candidates.append((w['kCGWindowNumber'], height))
+                    candidates.append((w['kCGWindowNumber'], onscreen, height))
             if candidates:
-                # Pick the largest window (main game window)
-                candidates.sort(key=lambda c: c[1], reverse=True)
+                # Prefer on-screen windows, then largest
+                candidates.sort(key=lambda c: (c[1], c[2]), reverse=True)
                 self.window_id = candidates[0][0]
                 return True
         except Exception:
@@ -117,7 +123,7 @@ class BoardReader:
         return None
 
     def capture(self):
-        """Capture Chess.app window."""
+        """Capture Chess.app window. Returns None if capture fails or image is blank."""
         if self.window_id is None:
             return None
         tmp = None
@@ -125,7 +131,7 @@ class BoardReader:
             fd, tmp = tempfile.mkstemp(suffix='.png', prefix='chess_')
             os.close(fd)
             result = subprocess.run(
-                ['screencapture', '-l', str(self.window_id), '-x', '-o', tmp],
+                ['screencapture', '-l', str(self.window_id), '-x', '-o', '-t', 'png', tmp],
                 capture_output=True, timeout=5
             )
             if result.returncode != 0:
@@ -133,7 +139,7 @@ class BoardReader:
                 self.find_window()
                 if self.window_id:
                     result = subprocess.run(
-                        ['screencapture', '-l', str(self.window_id), '-x', '-o', tmp],
+                        ['screencapture', '-l', str(self.window_id), '-x', '-o', '-t', 'png', tmp],
                         capture_output=True, timeout=5
                     )
                 if result.returncode != 0:
@@ -144,6 +150,17 @@ class BoardReader:
             os.unlink(tmp)
             if img.size[0] < 50 or img.size[1] < 50:
                 return None
+            # Detect blank/black images (macOS returns black for background windows)
+            pixels = img.load()
+            w, h = img.size
+            non_black = 0
+            for sy in range(h // 4, h * 3 // 4, h // 8):
+                for sx in range(w // 4, w * 3 // 4, w // 8):
+                    r, g, b = pixels[sx, sy][:3]
+                    if r > 10 or g > 10 or b > 10:
+                        non_black += 1
+            if non_black == 0:
+                return None  # All-black image = window not rendered
             return img
         except Exception:
             try:
@@ -202,13 +219,26 @@ class BoardReader:
         return True
 
     def _is_board(self, r, g, b):
-        if r < 40 and g < 40 and b < 40:
+        """Check if pixel is a board square. Supports Wood, Marble, Metal themes."""
+        # Black/very dark = window border or background
+        if r < 30 and g < 30 and b < 30:
             return False
-        if abs(r - g) < 10 and abs(g - b) < 10 and r < 80:
+        # Pure gray window chrome (neutral, low brightness)
+        if abs(r - g) < 8 and abs(g - b) < 8 and r < 60:
             return False
-        if r > 80 and (r - b) > 5:
+        # Liquid Glass translucent toolbar (semi-transparent gray)
+        if abs(r - g) < 12 and abs(g - b) < 12 and 60 <= r <= 180:
+            return False
+        # Wood theme: warm tones — light squares ~(220-240, 200-220, 140-180)
+        #                           dark squares  ~(140-170, 90-120, 60-90)
+        if r > 70 and (r - b) > 10:
             return True
-        if (r + g + b) > 300:
+        # Marble theme: cool/neutral — light squares bright white-ish
+        #                               dark squares greenish-gray
+        if (r + g + b) > 280:
+            return True
+        # Metal theme: blue/silver tones — dark squares have b >= r
+        if r > 60 and g > 60 and b > 60 and (r + g + b) > 200:
             return True
         return False
 
@@ -316,18 +346,22 @@ class StealthAdvisor:
         self.playing_as = chess.WHITE
         self.prev_image = None
         self.monitor_thread = None
+        self._last_trigger = 0  # Debounce for cheat code
 
     def start_engine(self):
         if self.engine is None:
-            self.engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH)
-            self.engine.configure({
-                "Threads": THREADS,
-                "Hash": HASH_MB,
-                "Skill Level": 20,
-                "UCI_LimitStrength": False,
-                "UCI_ShowWDL": True,
-                "Ponder": False,
-            })
+            try:
+                self.engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH)
+                self.engine.configure({
+                    "Threads": THREADS,
+                    "Hash": HASH_MB,
+                    "Skill Level": 20,
+                    "UCI_LimitStrength": False,
+                    "UCI_ShowWDL": True,
+                })
+            except FileNotFoundError:
+                notify("Chess Advisor", "Stockfish not found. Install: brew install stockfish")
+                raise
 
     def stop_engine(self):
         if self.engine:
@@ -341,30 +375,42 @@ class StealthAdvisor:
         """Analyze current position and show best move via notification."""
         with self.lock:
             try:
-                if not self.reader.find_window():
-                    notify("Chess Advisor", "Chess.app not found. Open a game first.")
-                    return
+                # Bring Chess.app to front so screen capture gets actual pixels
+                try:
+                    subprocess.run(['osascript', '-e', 'tell application "Chess" to activate'],
+                                   capture_output=True, timeout=3)
+                    time.sleep(0.5)
+                except Exception:
+                    pass
 
-                # Capture and calibrate if needed
-                img = self.reader.capture()
-                if img is None:
-                    notify("Chess Advisor", "Cannot capture Chess.app. Check Screen Recording permission.")
-                    return
+                has_window = self.reader.find_window()
 
-                if not self.reader.calibrated:
-                    if not self.reader.calibrate(img):
-                        notify("Chess Advisor", "Cannot detect board. Make sure Chess.app is visible.")
-                        return
+                # Try screen capture for move detection
+                img = None
+                if has_window:
+                    img = self.reader.capture()
+                    if img and not self.reader.calibrated:
+                        self.reader.calibrate(img)
 
-                # If not tracking yet, try to read game from Chess.app auto-save
+                # Always sync position from Chess.app auto-save PGN (works without screen capture)
+                self._sync_from_pgn()
+
+                # If we have images, also do pixel-based move detection
+                if img and self.reader.calibrated:
+                    if not self.tracking:
+                        self._start_tracking(img)
+                    if self.tracking and self.prev_image is not None:
+                        self._detect_new_moves(img)
+                    self.prev_image = img
+
+                # If PGN and image both failed, try title-based fallback
                 if not self.tracking:
-                    self._start_tracking(img)
-
-                # If we're tracking, detect any new moves
-                if self.tracking and self.prev_image is not None:
-                    self._detect_new_moves(img)
-
-                self.prev_image = img
+                    if not has_window:
+                        notify("Chess Advisor", "Chess.app not found. Open a game first.")
+                        return
+                    # We can see the window but can't read PGN or image — start fresh
+                    self.game_board = chess.Board()
+                    self.tracking = True
 
                 # Now analyze
                 self.start_engine()
@@ -471,45 +517,52 @@ class StealthAdvisor:
             except Exception as e:
                 notify("Chess Advisor Error", str(e)[:100])
 
-    def _start_tracking(self, img):
-        """Start tracking the game — try to read game state."""
-        # Try to read PGN from Chess.app auto-save
+    def _sync_from_pgn(self):
+        """Read the current game state from Chess.app auto-save PGN file."""
         pgn_path = os.path.expanduser(
             "~/Library/Containers/com.apple.Chess/Data/Library/Application Support/Chess/Autosave.game"
         )
-        if os.path.exists(pgn_path):
-            try:
-                with open(pgn_path, 'r') as f:
-                    content = f.read()
-                import chess.pgn
-                import io
-                game = chess.pgn.read_game(io.StringIO(content))
-                if game:
-                    self.game_board = chess.Board()
-                    for move in game.mainline_moves():
-                        self.game_board.push(move)
-                    self.tracking = True
-                    self.playing_as = self.reader.detect_color() or chess.WHITE
-                    return
-            except Exception:
-                pass
-
-        # Fallback: start from current position (assume new game or detect from title)
-        title = self.reader.get_title() or ""
-        move_match = re.search(r'Move\s+(\d+)', title)
-        if move_match:
-            move_num = int(move_match.group(1))
-            if move_num <= 1:
-                # New game, start fresh
-                self.game_board = chess.Board()
-                self.tracking = True
-                self.playing_as = self.reader.detect_color() or chess.WHITE
+        try:
+            if not os.path.exists(pgn_path):
                 return
+            with open(pgn_path, 'r') as f:
+                content = f.read()
+            if not content.strip():
+                return
+            game = chess.pgn.read_game(io.StringIO(content))
+            if game:
+                board = chess.Board()
+                for move in game.mainline_moves():
+                    board.push(move)
+                self.game_board = board
+                self.tracking = True
+                # Detect color from window title — check specific phrases
+                # "White to Move" / "Black to Move" tells whose turn it is, not our color
+                # Use player name from PGN headers if available
+                white_player = game.headers.get("White", "")
+                black_player = game.headers.get("Black", "")
+                if "Computer" in black_player and "Computer" not in white_player:
+                    self.playing_as = chess.WHITE
+                elif "Computer" in white_player and "Computer" not in black_player:
+                    self.playing_as = chess.BLACK
+                # Otherwise keep existing playing_as (don't overwrite)
+        except (PermissionError, OSError):
+            pass  # Container sandbox blocks access
+        except Exception:
+            pass
 
-        # Can't determine position — start fresh and hope for the best
+    def _start_tracking(self, img):
+        """Start tracking the game — try PGN sync first, then fresh board."""
+        # PGN sync already happened in analyze(), so if tracking is set, we're good
+        if self.tracking:
+            return
+
+        # Fallback: detect color from image and start fresh
+        detected = self.reader.detect_color()
+        if detected is not None:
+            self.playing_as = detected
         self.game_board = chess.Board()
         self.tracking = True
-        self.playing_as = self.reader.detect_color() or chess.WHITE
 
     def _detect_new_moves(self, img):
         """Detect if any new moves happened since last check."""
@@ -532,8 +585,9 @@ class StealthAdvisor:
                     if self.tracking and self.reader.calibrated:
                         img = self.reader.capture()
                         if img:
-                            self._detect_new_moves(img)
-                            self.prev_image = img
+                            with self.lock:
+                                self._detect_new_moves(img)
+                                self.prev_image = img
                 except Exception:
                     pass
                 time.sleep(POLL_INTERVAL)
@@ -542,7 +596,7 @@ class StealthAdvisor:
         self.monitor_thread.start()
 
     def on_key(self, key):
-        """Global key listener — watches for cheat code."""
+        """Global key listener — watches for cheat code (case-insensitive)."""
         try:
             char = key.char
             if char is None:
@@ -550,13 +604,18 @@ class StealthAdvisor:
         except AttributeError:
             return
 
-        self.code_buffer += char
+        self.code_buffer += char.lower()
         # Keep only last N characters
         if len(self.code_buffer) > 20:
             self.code_buffer = self.code_buffer[-20:]
 
         if self.code_buffer.endswith(CHEAT_CODE):
             self.code_buffer = ""
+            # Debounce: ignore if triggered within last 2 seconds
+            now = time.time()
+            if now - self._last_trigger < 2.0:
+                return
+            self._last_trigger = now
             # Run analysis in a separate thread to not block key listener
             threading.Thread(target=self.analyze, daemon=True).start()
 
