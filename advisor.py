@@ -187,9 +187,11 @@ class BoardWatcher:
             # Detect blank/black images (macOS returns black for background windows)
             pixels = img.load()
             w, h = img.size
+            step_y = max(1, h // 8)
+            step_x = max(1, w // 8)
             non_black = 0
-            for sy in range(h // 4, h * 3 // 4, h // 8):
-                for sx in range(w // 4, w * 3 // 4, w // 8):
+            for sy in range(h // 4, h * 3 // 4, step_y):
+                for sx in range(w // 4, w * 3 // 4, step_x):
                     r, g, b = pixels[sx, sy][:3]
                     if r > 10 or g > 10 or b > 10:
                         non_black += 1
@@ -725,7 +727,6 @@ class ChessAdvisor:
     def human_instruction(self, move):
         """Return a plain-English instruction like 'Move your Pawn on e2 to e4'."""
         piece = self.board.piece_at(move.from_square)
-        captured = self.board.piece_at(move.to_square)
         from_sq = chess.square_name(move.from_square)
         to_sq = chess.square_name(move.to_square)
         piece_name = PIECE_NAMES.get(piece.piece_type, "?") if piece else "?"
@@ -736,14 +737,14 @@ class ChessAdvisor:
             else:
                 return "Castle queenside — move your King two squares left"
 
-        if captured:
+        if self.board.is_en_passant(move):
+            instr = f"Move your {piece_name} on {from_sq} to {to_sq}, capturing their Pawn en passant"
+        elif self.board.piece_at(move.to_square):
+            captured = self.board.piece_at(move.to_square)
             cap_name = PIECE_NAMES.get(captured.piece_type, "piece")
             instr = f"Move your {piece_name} on {from_sq} to {to_sq}, capturing their {cap_name}"
         else:
             instr = f"Move your {piece_name} on {from_sq} to {to_sq}"
-
-        if self.board.is_en_passant(move):
-            instr += " (en passant capture)"
         if move.promotion:
             promo_name = PIECE_NAMES.get(move.promotion, "Queen")
             instr += f", then promote to {promo_name}"
@@ -933,7 +934,6 @@ class ChessAdvisor:
     def get_move_reason(self, move, score, results):
         """Explain WHY the best move is good based on position context."""
         piece = self.board.piece_at(move.from_square)
-        captured = self.board.piece_at(move.to_square)
         phase = self.get_game_phase()
         reasons = []
 
@@ -952,8 +952,11 @@ class ChessAdvisor:
         if self.board.is_castling(move):
             reasons.append("secures your King and connects your Rooks")
 
-        # Captures
-        if captured:
+        # Captures (handle en passant separately)
+        if self.board.is_en_passant(move):
+            reasons.append("captures their Pawn en passant")
+        elif self.board.piece_at(move.to_square):
+            captured = self.board.piece_at(move.to_square)
             cap_name = PIECE_NAMES.get(captured.piece_type, "piece")
             piece_vals = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
             their_val = piece_vals.get(captured.piece_type, 0)
@@ -1135,7 +1138,8 @@ class ChessAdvisor:
                     os.unlink(tmp)
                     if pgn_text.strip():
                         return pgn_text
-                os.unlink(tmp)
+                elif os.path.exists(tmp):
+                    os.unlink(tmp)
             except Exception:
                 try:
                     os.unlink(tmp)
@@ -1190,7 +1194,7 @@ class ChessAdvisor:
 
         wdl = best.get("wdl")
         if wdl:
-            oriented = wdl if self.playing_as == chess.WHITE else (wdl[2], wdl[1], wdl[0])
+            oriented = wdl.white() if self.playing_as == chess.WHITE else wdl.black()
             out.append(self.wdl_str(oriented))
 
         threats = self.extract_threats_from_pv(results)
@@ -1308,7 +1312,7 @@ class ChessAdvisor:
 
         wdl = results[0].get("wdl")
         if wdl:
-            oriented = wdl if self.playing_as == chess.WHITE else (wdl[2], wdl[1], wdl[0])
+            oriented = wdl.white() if self.playing_as == chess.WHITE else wdl.black()
             out.append(self.wdl_str(oriented))
 
         out.append(f"\n  {BOLD}Predicted opponent moves:{RESET}")
@@ -1373,7 +1377,6 @@ class ChessAdvisor:
 
     def run(self):
         print(f"{CLEAR}", end="")
-        detect_label = "AUTO-DETECT" if VISION_AVAILABLE else "MANUAL"
         banner = [
             f"{BOLD}╔══════════════════════════════════════════════════════════╗{RESET}",
             f"{BOLD}║  ♚ CHESS ADVISOR — Stockfish 18 · MAXIMUM STRENGTH ♚   ║{RESET}",
