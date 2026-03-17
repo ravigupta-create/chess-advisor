@@ -757,54 +757,274 @@ class ChessAdvisor:
         self.board.pop()
         return instr
 
-    def get_position_tip(self):
-        """Return a coaching tip based on the current game phase and position."""
+    def _count_undeveloped(self):
+        """Count minor pieces still on their starting squares."""
+        back_rank = 0 if self.playing_as == chess.WHITE else 7
+        starting = {
+            chess.square(1, back_rank): chess.KNIGHT,
+            chess.square(6, back_rank): chess.KNIGHT,
+            chess.square(2, back_rank): chess.BISHOP,
+            chess.square(5, back_rank): chess.BISHOP,
+        }
+        count = 0
+        for sq, ptype in starting.items():
+            p = self.board.piece_at(sq)
+            if p and p.color == self.playing_as and p.piece_type == ptype:
+                count += 1
+        return count
+
+    def _center_control(self):
+        """Return (our, their) count of center square control (d4,d5,e4,e5)."""
+        center = [chess.D4, chess.D5, chess.E4, chess.E5]
+        ours = theirs = 0
+        for sq in center:
+            our_att = len(self.board.attackers(self.playing_as, sq))
+            their_att = len(self.board.attackers(not self.playing_as, sq))
+            # Occupying the center also counts
+            p = self.board.piece_at(sq)
+            if p and p.color == self.playing_as:
+                our_att += 1
+            elif p and p.color != self.playing_as:
+                their_att += 1
+            ours += our_att
+            theirs += their_att
+        return ours, theirs
+
+    def _king_safety_score(self):
+        """Rough king safety: count attackers near our king. Higher = more danger."""
+        king_sq = self.board.king(self.playing_as)
+        if king_sq is None:
+            return 0
+        danger = 0
+        # Check squares around king
+        king_file = chess.square_file(king_sq)
+        king_rank = chess.square_rank(king_sq)
+        for df in range(-2, 3):
+            for dr in range(-2, 3):
+                f, r = king_file + df, king_rank + dr
+                if 0 <= f <= 7 and 0 <= r <= 7:
+                    sq = chess.square(f, r)
+                    attackers = self.board.attackers(not self.playing_as, sq)
+                    danger += len(attackers)
+        return danger
+
+    def _find_passed_pawns(self, color):
+        """Find passed pawns for the given color."""
+        passed = []
+        opp = not color
+        for sq in self.board.pieces(chess.PAWN, color):
+            file = chess.square_file(sq)
+            rank = chess.square_rank(sq)
+            is_passed = True
+            # Check if any opponent pawn can block or capture on this file or adjacent
+            for f in range(max(0, file - 1), min(8, file + 2)):
+                for opp_sq in self.board.pieces(chess.PAWN, opp):
+                    opp_rank = chess.square_rank(opp_sq)
+                    opp_file = chess.square_file(opp_sq)
+                    if opp_file == f:
+                        if color == chess.WHITE and opp_rank > rank:
+                            is_passed = False
+                        elif color == chess.BLACK and opp_rank < rank:
+                            is_passed = False
+            if is_passed:
+                passed.append(sq)
+        return passed
+
+    def get_position_assessment(self):
+        """Return a detailed position assessment with multiple factors."""
         phase = self.get_game_phase()
         move_num = self.board.fullmove_number
         mat = self.get_material_balance()
-        piece_map = self.board.piece_map()
-
-        # Check castling rights
         can_castle = self.board.has_castling_rights(self.playing_as)
-        has_castled = not can_castle and move_num > 4
+        undeveloped = self._count_undeveloped()
+        our_center, their_center = self._center_control()
+        king_danger = self._king_safety_score()
+        our_passed = self._find_passed_pawns(self.playing_as)
+        their_passed = self._find_passed_pawns(not self.playing_as)
 
+        lines = []
+        lines.append(f"  {CYAN}{BOLD}--- Position Assessment ({phase}, Move {move_num}) ---{RESET}")
+
+        # Material
+        if mat > 0:
+            lines.append(f"  {GREEN}  + You're up {mat} point{'s' if mat != 1 else ''} of material{RESET}")
+        elif mat < 0:
+            lines.append(f"  {RED}  - You're down {abs(mat)} point{'s' if abs(mat) != 1 else ''} of material{RESET}")
+        else:
+            lines.append(f"  {YELLOW}  = Material is even{RESET}")
+
+        # Center control
+        if our_center > their_center + 3:
+            lines.append(f"  {GREEN}  + You dominate the center{RESET}")
+        elif their_center > our_center + 3:
+            lines.append(f"  {RED}  - Opponent controls the center — fight back!{RESET}")
+
+        # Development (opening/early middlegame)
+        if phase == "Opening" or (phase == "Middlegame" and move_num <= 15):
+            if undeveloped >= 3:
+                lines.append(f"  {RED}  - {undeveloped} minor pieces still undeveloped — get them out!{RESET}")
+            elif undeveloped == 2:
+                lines.append(f"  {YELLOW}  ~ 2 minor pieces still on back rank — keep developing{RESET}")
+            elif undeveloped == 1:
+                lines.append(f"  {YELLOW}  ~ 1 minor piece left to develop{RESET}")
+            else:
+                lines.append(f"  {GREEN}  + All minor pieces developed{RESET}")
+
+        # Castling
         if phase == "Opening":
-            if move_num <= 3:
-                return "Opening: Control the center with pawns and develop your Knights and Bishops."
-            if can_castle and move_num >= 4:
-                return "Opening: Try to castle soon to protect your King and connect your Rooks."
-            # Check if knights/bishops are still on starting squares
-            developed = 0
-            back_rank = 0 if self.playing_as == chess.WHITE else 7
-            for file in range(8):
-                sq = chess.square(file, back_rank)
-                p = self.board.piece_at(sq)
-                if p and p.color == self.playing_as and p.piece_type in (chess.KNIGHT, chess.BISHOP):
-                    developed += 1
-            if developed >= 2:
-                return "Opening: You still have minor pieces on the back rank — develop them!"
-            return "Opening: Keep developing pieces and fight for the center."
+            if can_castle:
+                if move_num >= 5:
+                    lines.append(f"  {YELLOW}  ! Castle soon to protect your King{RESET}")
+                else:
+                    lines.append(f"  {DIM}  ~ Castling still available{RESET}")
 
+        # King safety
+        if king_danger >= 15:
+            lines.append(f"  {RED}  ! Your King is exposed — be careful!{RESET}")
+        elif king_danger >= 10 and phase != "Endgame":
+            lines.append(f"  {YELLOW}  ~ Some pressure on your King{RESET}")
+
+        # Passed pawns
+        if our_passed:
+            names = ", ".join(chess.square_name(sq) for sq in our_passed)
+            lines.append(f"  {GREEN}  + You have passed pawn{'s' if len(our_passed) > 1 else ''}: {names}{RESET}")
+        if their_passed:
+            names = ", ".join(chess.square_name(sq) for sq in their_passed)
+            lines.append(f"  {RED}  - Opponent has passed pawn{'s' if len(their_passed) > 1 else ''}: {names}{RESET}")
+
+        # Phase-specific strategy
+        lines.append(f"  {CYAN}{BOLD}  Strategy:{RESET}", )
+        if phase == "Opening":
+            if can_castle and undeveloped >= 2:
+                lines.append(f"  {CYAN}  Develop your pieces and castle as soon as possible.{RESET}")
+            elif can_castle:
+                lines.append(f"  {CYAN}  You're nearly developed — castle and start your middlegame plan.{RESET}")
+            elif undeveloped >= 2:
+                lines.append(f"  {CYAN}  Finish developing your pieces before attacking.{RESET}")
+            else:
+                lines.append(f"  {CYAN}  Good development! Look to seize the initiative.{RESET}")
         elif phase == "Middlegame":
-            if self.board.is_check():
-                return "You're in check — get your King to safety first!"
             if mat >= 3:
-                return "Middlegame: You're up material — simplify by trading pieces to convert your advantage."
+                lines.append(f"  {CYAN}  You're ahead — trade pieces to simplify into a winning endgame.{RESET}")
             elif mat <= -3:
-                return "Middlegame: You're down material — look for tactics and avoid more trades."
-            # Check for open files for rooks
-            return "Middlegame: Look for tactics, create threats, and keep your pieces active."
-
+                lines.append(f"  {CYAN}  Down material — look for tactical shots and avoid trades.{RESET}")
+            elif king_danger >= 12:
+                lines.append(f"  {CYAN}  Prioritize King safety, then look for counterplay.{RESET}")
+            elif our_center > their_center + 2:
+                lines.append(f"  {CYAN}  You control the center — use it to launch an attack!{RESET}")
+            else:
+                lines.append(f"  {CYAN}  Improve your piece activity and create threats.{RESET}")
         else:  # Endgame
             if mat >= 3:
-                return "Endgame: Push your passed pawns and use your King actively to convert the win."
+                if our_passed:
+                    lines.append(f"  {CYAN}  Push your passed pawns with King support to promote!{RESET}")
+                else:
+                    lines.append(f"  {CYAN}  Activate your King and create a passed pawn to win.{RESET}")
             elif mat <= -3:
-                return "Endgame: Try to create a fortress or force a draw — activate your King."
-            # Check pawn count
-            our_pawns = len(self.board.pieces(chess.PAWN, self.playing_as))
-            if our_pawns == 0:
-                return "Endgame: No pawns left — you need piece activity to win or draw."
-            return "Endgame: Activate your King, push passed pawns, and cut off the opponent's King."
+                lines.append(f"  {CYAN}  Try to blockade their pawns and seek drawing chances.{RESET}")
+            elif our_passed:
+                lines.append(f"  {CYAN}  Advance your passed pawns — they're your winning chance!{RESET}")
+            elif their_passed:
+                lines.append(f"  {CYAN}  Stop their passed pawns! Blockade with a piece on their path.{RESET}")
+            else:
+                lines.append(f"  {CYAN}  Activate your King aggressively and create a passed pawn.{RESET}")
+
+        return "\n".join(lines)
+
+    def get_move_reason(self, move, score, results):
+        """Explain WHY the best move is good based on position context."""
+        piece = self.board.piece_at(move.from_square)
+        captured = self.board.piece_at(move.to_square)
+        phase = self.get_game_phase()
+        reasons = []
+
+        # Checkmate / check
+        self.board.push(move)
+        if self.board.is_checkmate():
+            self.board.pop()
+            return f"{MAGENTA}This is CHECKMATE — the game is over!{RESET}"
+        gives_check = self.board.is_check()
+        self.board.pop()
+
+        if gives_check:
+            reasons.append("puts the opponent in check")
+
+        # Castling
+        if self.board.is_castling(move):
+            reasons.append("secures your King and connects your Rooks")
+
+        # Captures
+        if captured:
+            cap_name = PIECE_NAMES.get(captured.piece_type, "piece")
+            piece_vals = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
+            their_val = piece_vals.get(captured.piece_type, 0)
+            our_val = piece_vals.get(piece.piece_type, 0) if piece else 0
+            if their_val > our_val:
+                reasons.append(f"wins material (their {cap_name} is worth more)")
+            elif their_val == our_val:
+                reasons.append(f"trades off a {cap_name}")
+            else:
+                reasons.append(f"captures their {cap_name}")
+
+        # Development moves in opening
+        if phase == "Opening" and piece:
+            if piece.piece_type in (chess.KNIGHT, chess.BISHOP):
+                back_rank = 0 if self.playing_as == chess.WHITE else 7
+                if chess.square_rank(move.from_square) == back_rank:
+                    reasons.append("develops a piece toward the center")
+            if piece.piece_type == chess.PAWN:
+                to_file = chess.square_file(move.to_square)
+                to_rank = chess.square_rank(move.to_square)
+                if to_file in (3, 4) and to_rank in (3, 4):
+                    reasons.append("controls the center")
+
+        # Center control
+        to_sq = move.to_square
+        center = {chess.D4, chess.D5, chess.E4, chess.E5}
+        extended_center = {chess.C3, chess.C4, chess.C5, chess.C6,
+                          chess.D3, chess.D6, chess.E3, chess.E6,
+                          chess.F3, chess.F4, chess.F5, chess.F6}
+        if to_sq in center and not captured and piece and piece.piece_type != chess.KING:
+            if "center" not in " ".join(reasons):
+                reasons.append("plants a piece in the center")
+        elif to_sq in extended_center and piece and piece.piece_type in (chess.KNIGHT, chess.BISHOP):
+            if "center" not in " ".join(reasons):
+                reasons.append("moves to an active central square")
+
+        # Pawn promotion
+        if move.promotion:
+            promo_name = PIECE_NAMES.get(move.promotion, "Queen")
+            reasons.append(f"promotes to a {promo_name}!")
+
+        # Endgame King activation
+        if phase == "Endgame" and piece and piece.piece_type == chess.KING:
+            reasons.append("activates your King (critical in endgames)")
+
+        # Passed pawn push
+        if piece and piece.piece_type == chess.PAWN and phase in ("Middlegame", "Endgame"):
+            passed = self._find_passed_pawns(self.playing_as)
+            if move.from_square in passed:
+                reasons.append("advances your passed pawn closer to promotion")
+
+        # Engine says it's winning
+        if score.is_mate():
+            m = score.mate()
+            if m > 0:
+                reasons.append(f"leads to forced checkmate in {m} moves")
+        elif not reasons:
+            cp = score.score() or 0
+            if cp > 200:
+                reasons.append("maintains your winning advantage")
+            elif cp > 50:
+                reasons.append("keeps a solid edge")
+            elif cp >= -50:
+                reasons.append("maintains the balance")
+            else:
+                reasons.append("is the best defensive option")
+
+        if not reasons:
+            return f"{CYAN}Best engine move at this depth.{RESET}"
+        return f"{CYAN}Why: {'; '.join(reasons)}.{RESET}"
 
     def format_pv(self, pv, max_moves=PV_DEPTH_DISPLAY):
         temp = self.board.copy()
@@ -955,11 +1175,11 @@ class ChessAdvisor:
         out.append(f"\n  {BOLD}{'─'*52}{RESET}")
         out.append(f"  {GREEN}{BOLD}➤ PLAY: {best_san}{RESET}")
         out.append(f"  {GREEN}{BOLD}  {best_instruction}{RESET}")
+        out.append(f"  {self.get_move_reason(best_move, score, results)}")
         out.append(f"  {BOLD}{'─'*52}{RESET}")
 
-        # Game-phase coaching tip
-        tip = self.get_position_tip()
-        out.append(f"  {CYAN}{tip}{RESET}")
+        # Position assessment with strategy
+        out.append(self.get_position_assessment())
         print("\n".join(out))
 
         eval_before = score
