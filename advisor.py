@@ -42,12 +42,140 @@ ENGINE_CONFIG = {
 
 # ── Analysis settings ──────────────────────────────────────────────────
 DEFAULT_TIME = 3.0
+ELEVATED_TIME = 5.0
 CRITICAL_TIME = 8.0
 QUICK_TIME = 1.5
 NORMAL_MULTIPV = 3
 CRITICAL_MULTIPV = 5
 PV_DEPTH_DISPLAY = 8
 CACHE_MAX_SIZE = 200
+
+# ── Opening book (longest-prefix match on UCI move sequences) ─────────
+OPENING_BOOK = {
+    ("e2e4",): "King's Pawn Opening",
+    ("d2d4",): "Queen's Pawn Opening",
+    ("c2c4",): "English Opening",
+    ("g1f3",): "Reti Opening",
+    ("b2b3",): "Larsen's Opening",
+    ("g2g3",): "King's Fianchetto Opening",
+    ("f2f4",): "Bird's Opening",
+    ("b2b4",): "Sokolsky Opening",
+    # Sicilian
+    ("e2e4", "c7c5"): "Sicilian Defense",
+    ("e2e4", "c7c5", "g1f3"): "Sicilian Defense",
+    ("e2e4", "c7c5", "g1f3", "d7d6"): "Sicilian Najdorf",
+    ("e2e4", "c7c5", "g1f3", "d7d6", "d2d4", "c5d4", "f3d4", "g8f6", "b1c3", "a7a6"): "Sicilian Najdorf",
+    ("e2e4", "c7c5", "g1f3", "b8c6"): "Sicilian Defense",
+    ("e2e4", "c7c5", "g1f3", "e7e6"): "Sicilian Scheveningen",
+    ("e2e4", "c7c5", "g1f3", "e7e6", "d2d4", "c5d4", "f3d4", "a7a6"): "Sicilian Kan",
+    ("e2e4", "c7c5", "g1f3", "g8f6"): "Sicilian Defense",
+    ("e2e4", "c7c5", "g1f3", "b8c6", "d2d4", "c5d4", "f3d4", "g7g6"): "Sicilian Dragon",
+    ("e2e4", "c7c5", "g1f3", "b8c6", "f1b5"): "Sicilian Rossolimo",
+    ("e2e4", "c7c5", "b1c3"): "Closed Sicilian",
+    # French
+    ("e2e4", "e7e6"): "French Defense",
+    ("e2e4", "e7e6", "d2d4", "d7d5"): "French Defense",
+    ("e2e4", "e7e6", "d2d4", "d7d5", "b1c3"): "French Winawer/Classical",
+    ("e2e4", "e7e6", "d2d4", "d7d5", "b1c3", "f8b4"): "French Winawer",
+    ("e2e4", "e7e6", "d2d4", "d7d5", "b1c3", "g8f6"): "French Classical",
+    ("e2e4", "e7e6", "d2d4", "d7d5", "e4e5"): "French Advance",
+    ("e2e4", "e7e6", "d2d4", "d7d5", "b1d2"): "French Tarrasch",
+    ("e2e4", "e7e6", "d2d4", "d7d5", "e4d5"): "French Exchange",
+    # Caro-Kann
+    ("e2e4", "c7c6"): "Caro-Kann Defense",
+    ("e2e4", "c7c6", "d2d4", "d7d5"): "Caro-Kann Defense",
+    ("e2e4", "c7c6", "d2d4", "d7d5", "b1c3", "d5e4", "c3e4"): "Caro-Kann Classical",
+    ("e2e4", "c7c6", "d2d4", "d7d5", "e4e5"): "Caro-Kann Advance",
+    ("e2e4", "c7c6", "d2d4", "d7d5", "e4d5"): "Caro-Kann Exchange",
+    # Italian / Giuoco Piano
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1c4"): "Italian Game",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5"): "Giuoco Piano",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6"): "Two Knights Defense",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "c2c3"): "Giuoco Piano",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "b2b4"): "Evans Gambit",
+    # Ruy Lopez
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1b5"): "Ruy Lopez",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6"): "Ruy Lopez (Morphy Defense)",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5a4"): "Ruy Lopez",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "b5a4", "g8f6"): "Ruy Lopez Closed",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "g8f6"): "Ruy Lopez Berlin",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "f7f5"): "Ruy Lopez Schliemann",
+    # Scotch
+    ("e2e4", "e7e5", "g1f3", "b8c6", "d2d4"): "Scotch Game",
+    ("e2e4", "e7e5", "g1f3", "b8c6", "d2d4", "e5d4", "f3d4"): "Scotch Game",
+    # Petrov
+    ("e2e4", "e7e5", "g1f3", "g8f6"): "Petrov's Defense",
+    # Philidor
+    ("e2e4", "e7e5", "g1f3", "d7d6"): "Philidor Defense",
+    # King's Gambit
+    ("e2e4", "e7e5", "f2f4"): "King's Gambit",
+    ("e2e4", "e7e5", "f2f4", "e5f4"): "King's Gambit Accepted",
+    ("e2e4", "e7e5", "f2f4", "f8c5"): "King's Gambit Declined",
+    # Vienna
+    ("e2e4", "e7e5", "b1c3"): "Vienna Game",
+    # Pirc / Modern
+    ("e2e4", "d7d6"): "Pirc Defense",
+    ("e2e4", "g7g6"): "Modern Defense",
+    ("e2e4", "d7d6", "d2d4", "g8f6", "b1c3", "g7g6"): "Pirc Defense",
+    # Scandinavian
+    ("e2e4", "d7d5"): "Scandinavian Defense",
+    ("e2e4", "d7d5", "e4d5", "d8d5"): "Scandinavian Defense",
+    ("e2e4", "d7d5", "e4d5", "g8f6"): "Scandinavian (Modern)",
+    # Alekhine
+    ("e2e4", "g8f6"): "Alekhine's Defense",
+    # Queen's Gambit
+    ("d2d4", "d7d5", "c2c4"): "Queen's Gambit",
+    ("d2d4", "d7d5", "c2c4", "e7e6"): "Queen's Gambit Declined",
+    ("d2d4", "d7d5", "c2c4", "c7c6"): "Slav Defense",
+    ("d2d4", "d7d5", "c2c4", "d5c4"): "Queen's Gambit Accepted",
+    ("d2d4", "d7d5", "c2c4", "e7e6", "b1c3", "g8f6"): "Queen's Gambit Declined",
+    ("d2d4", "d7d5", "c2c4", "c7c6", "g1f3", "g8f6", "b1c3"): "Semi-Slav Defense",
+    # London / Colle
+    ("d2d4", "d7d5", "g1f3", "g8f6", "c1f4"): "London System",
+    ("d2d4", "g8f6", "g1f3", "d7d5", "c1f4"): "London System",
+    ("d2d4", "g8f6", "c1f4"): "London System",
+    # Catalan
+    ("d2d4", "d7d5", "c2c4", "e7e6", "g2g3"): "Catalan Opening",
+    ("d2d4", "g8f6", "c2c4", "e7e6", "g2g3"): "Catalan Opening",
+    # King's Indian
+    ("d2d4", "g8f6", "c2c4", "g7g6"): "King's Indian Defense",
+    ("d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7"): "King's Indian Defense",
+    ("d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7", "e2e4", "d7d6"): "King's Indian Classical",
+    ("d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7", "e2e4", "d7d6", "g1f3", "e8g8", "f1e2", "e7e5"): "King's Indian Classical",
+    ("d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "f8g7", "e2e4", "d7d6", "f2f3"): "King's Indian Samisch",
+    # Nimzo-Indian
+    ("d2d4", "g8f6", "c2c4", "e7e6", "b1c3", "f8b4"): "Nimzo-Indian Defense",
+    # Queen's Indian
+    ("d2d4", "g8f6", "c2c4", "e7e6", "g1f3", "b7b6"): "Queen's Indian Defense",
+    # Bogo-Indian
+    ("d2d4", "g8f6", "c2c4", "e7e6", "g1f3", "f8b4"): "Bogo-Indian Defense",
+    # Grunfeld
+    ("d2d4", "g8f6", "c2c4", "g7g6", "b1c3", "d7d5"): "Grunfeld Defense",
+    # Benoni
+    ("d2d4", "g8f6", "c2c4", "c7c5"): "Benoni Defense",
+    ("d2d4", "g8f6", "c2c4", "c7c5", "d4d5"): "Modern Benoni",
+    # Dutch
+    ("d2d4", "f7f5"): "Dutch Defense",
+    ("d2d4", "f7f5", "c2c4", "g8f6", "g2g3"): "Dutch Leningrad",
+    ("d2d4", "f7f5", "c2c4", "e7e6"): "Dutch Stonewall",
+    # English
+    ("c2c4", "e7e5"): "English Opening (Reversed Sicilian)",
+    ("c2c4", "g8f6"): "English Opening",
+    ("c2c4", "c7c5"): "English Symmetrical",
+    # Reti
+    ("g1f3", "d7d5"): "Reti Opening",
+    ("g1f3", "d7d5", "g2g3"): "King's Indian Attack",
+    ("g1f3", "d7d5", "c2c4"): "Reti Opening",
+    # e4 e5 basics
+    ("e2e4", "e7e5"): "King's Pawn Game",
+    ("e2e4", "e7e5", "g1f3"): "King's Knight Opening",
+    ("e2e4", "e7e5", "g1f3", "b8c6"): "King's Knight Opening",
+}
+
+# ── Move quality thresholds (centipawns) ──────────────────────────────
+BLUNDER_THRESHOLD = 200
+MISTAKE_THRESHOLD = 100
+INACCURACY_THRESHOLD = 50
 
 # ── Screen capture settings ────────────────────────────────────────────
 POLL_INTERVAL = 0.4          # Seconds between screen checks
@@ -539,8 +667,13 @@ class ChessAdvisor:
         self.game_pgn = chess.pgn.Game()
         self.pgn_node = self.game_pgn
         self.last_eval = None
+        self.last_eval_cp = 0
         self.watcher = BoardWatcher()
         self.auto_detect = False
+        # Tracking for post-game analysis
+        self.eval_history = []           # [(move_num, color, cp_score)]
+        self.move_quality_history = []   # [(move_num, color, san, label, cp_loss)]
+        self.turning_points = []         # [(move_num, color, san, cp_swing)]
 
     def start_engine(self):
         self.engine = chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH)
@@ -556,33 +689,68 @@ class ChessAdvisor:
 
     # ── Analysis ───────────────────────────────────────────────────────
 
-    def is_critical_position(self):
+    def position_complexity(self):
+        """Return complexity level: 0=normal, 1=elevated, 2=critical."""
+        level = 0
         if self.board.is_check():
-            return True
+            level = max(level, 2)
         if len(self.board.move_stack) < 6:
-            return False
+            return level
         our_king = self.board.king(self.playing_as)
         their_king = self.board.king(not self.playing_as)
         if our_king is not None and len(self.board.attackers(not self.playing_as, our_king)) > 0:
-            return True
+            level = max(level, 2)
         if their_king is not None and len(self.board.attackers(self.playing_as, their_king)) > 0:
-            return True
+            level = max(level, 2)
         if len(self.board.piece_map()) <= 10:
-            return True
-        if sum(1 for m in self.board.legal_moves if self.board.is_capture(m)) >= 4:
-            return True
-        return False
+            level = max(level, 2)
+        # Many captures available = tactical tension
+        captures = sum(1 for m in self.board.legal_moves if self.board.is_capture(m))
+        if captures >= 4:
+            level = max(level, 2)
+        elif captures >= 2:
+            level = max(level, 1)
+        # Eval swing from last move = volatile position
+        if self.eval_history and len(self.eval_history) >= 2:
+            last_cp = self.eval_history[-1][2]
+            prev_cp = self.eval_history[-2][2]
+            if abs(last_cp - prev_cp) >= 150:
+                level = max(level, 2)
+            elif abs(last_cp - prev_cp) >= 80:
+                level = max(level, 1)
+        # Pawn tension (pawns facing each other)
+        tension = 0
+        for sq in self.board.pieces(chess.PAWN, self.playing_as):
+            attacks = self.board.attacks(sq)
+            for att_sq in attacks:
+                p = self.board.piece_at(att_sq)
+                if p and p.color != self.playing_as:
+                    tension += 1
+        if tension >= 3:
+            level = max(level, 1)
+        # Endgame transition (piece count just dropped)
+        if len(self.board.piece_map()) <= 14 and self.get_game_phase() == "Endgame":
+            level = max(level, 1)
+        return level
+
+    def is_critical_position(self):
+        return self.position_complexity() >= 2
 
     def analyze_position(self, multipv=NORMAL_MULTIPV, think_time=None):
         fen = self.board.fen()
         cache_key = (fen, multipv, think_time)
         cached = self.analysis_cache.get(cache_key)
         if cached is not None:
-            return cached, False
+            return cached, self.position_complexity() >= 2
 
-        critical = self.is_critical_position()
+        complexity = self.position_complexity()
         if think_time is None:
-            think_time = CRITICAL_TIME if critical else DEFAULT_TIME
+            if complexity >= 2:
+                think_time = CRITICAL_TIME
+            elif complexity == 1:
+                think_time = ELEVATED_TIME
+            else:
+                think_time = DEFAULT_TIME
 
         result = self.engine.analyse(
             self.board,
@@ -590,7 +758,7 @@ class ChessAdvisor:
             multipv=multipv,
         )
         self.analysis_cache.put(cache_key, result)
-        return result, critical
+        return result, complexity >= 2
 
     def extract_threats_from_pv(self, results):
         threats = []
@@ -631,6 +799,465 @@ class ChessAdvisor:
             else:
                 black_mat += v
         return (white_mat - black_mat) if self.playing_as == chess.WHITE else (black_mat - white_mat)
+
+    # ── Opening Recognition ───────────────────────────────────────────
+
+    def identify_opening(self):
+        """Match current move sequence against opening book. Longest prefix wins."""
+        moves = [m.uci() for m in self.board.move_stack]
+        best_name = None
+        for length in range(len(moves), 0, -1):
+            key = tuple(moves[:length])
+            if key in OPENING_BOOK:
+                best_name = OPENING_BOOK[key]
+                break
+        return best_name
+
+    # ── Pawn Structure Analysis ───────────────────────────────────────
+
+    def analyze_pawn_structure(self, color):
+        """Analyze pawn structure: doubled, isolated, backward, chains, islands."""
+        pawns = list(self.board.pieces(chess.PAWN, color))
+        files_with_pawns = [chess.square_file(sq) for sq in pawns]
+        from collections import Counter
+        file_counts = Counter(files_with_pawns)
+
+        doubled = [f for f, c in file_counts.items() if c >= 2]
+        isolated = []
+        backward = []
+        chain_count = 0
+
+        for sq in pawns:
+            f = chess.square_file(sq)
+            r = chess.square_rank(sq)
+            adj_files = [af for af in (f - 1, f + 1) if 0 <= af <= 7]
+            has_adj_pawn = any(chess.square_file(p) in adj_files for p in pawns if p != sq)
+            if not has_adj_pawn:
+                isolated.append(sq)
+            # Backward: no friendly pawn on adjacent files at same or behind rank
+            if color == chess.WHITE:
+                behind_or_equal = [p for p in pawns if p != sq and chess.square_file(p) in adj_files
+                                   and chess.square_rank(p) <= r]
+            else:
+                behind_or_equal = [p for p in pawns if p != sq and chess.square_file(p) in adj_files
+                                   and chess.square_rank(p) >= r]
+            front_sq = chess.square(f, r + 1) if color == chess.WHITE and r < 7 else \
+                       chess.square(f, r - 1) if color == chess.BLACK and r > 0 else None
+            if not behind_or_equal and front_sq is not None:
+                enemy_controls = len(self.board.attackers(not color, front_sq))
+                if enemy_controls > 0:
+                    backward.append(sq)
+            # Chain: pawn defended by another pawn
+            defenders = self.board.attackers(color, sq)
+            for d in defenders:
+                dp = self.board.piece_at(d)
+                if dp and dp.piece_type == chess.PAWN and dp.color == color:
+                    chain_count += 1
+                    break
+
+        # Pawn islands
+        occupied_files = sorted(set(files_with_pawns))
+        islands = 1 if occupied_files else 0
+        for i in range(1, len(occupied_files)):
+            if occupied_files[i] - occupied_files[i - 1] > 1:
+                islands += 1
+
+        return {
+            "doubled": doubled,
+            "isolated": [chess.square_name(s) for s in isolated],
+            "backward": [chess.square_name(s) for s in backward],
+            "chains": chain_count,
+            "islands": islands,
+        }
+
+    # ── Piece Activity Assessment ─────────────────────────────────────
+
+    def assess_piece_activity(self, color):
+        """Analyze piece activity: mobility, trapped pieces, outposts, open files."""
+        observations = []
+        opp = not color
+
+        for sq in self.board.pieces(chess.KNIGHT, color):
+            mobility = len([s for s in self.board.attacks(sq)
+                           if self.board.piece_at(s) is None or self.board.piece_at(s).color != color])
+            if mobility <= 2:
+                observations.append(f"{RED}  ! Knight on {chess.square_name(sq)} is trapped ({mobility} moves){RESET}")
+            if self._is_outpost(sq, color):
+                observations.append(f"{GREEN}  + Knight outpost on {chess.square_name(sq)}{RESET}")
+
+        for sq in self.board.pieces(chess.BISHOP, color):
+            mobility = len([s for s in self.board.attacks(sq)
+                           if self.board.piece_at(s) is None or self.board.piece_at(s).color != color])
+            if mobility <= 2:
+                observations.append(f"{RED}  ! Bishop on {chess.square_name(sq)} is restricted ({mobility} moves){RESET}")
+            # Bad bishop: many own pawns on same color squares
+            bsq_color = (chess.square_rank(sq) + chess.square_file(sq)) % 2
+            own_pawns_same_color = sum(1 for p in self.board.pieces(chess.PAWN, color)
+                                       if (chess.square_rank(p) + chess.square_file(p)) % 2 == bsq_color)
+            if own_pawns_same_color >= 4:
+                observations.append(f"{YELLOW}  ~ Bad bishop on {chess.square_name(sq)} (blocked by own pawns){RESET}")
+
+        for sq in self.board.pieces(chess.ROOK, color):
+            f = chess.square_file(sq)
+            if self._is_open_file(f):
+                observations.append(f"{GREEN}  + Rook on open file {chr(f + ord('a'))}{RESET}")
+            elif self._is_semi_open_file(f, color):
+                observations.append(f"{GREEN}  + Rook on semi-open file {chr(f + ord('a'))}{RESET}")
+            # Rook on 7th rank
+            seventh = 6 if color == chess.WHITE else 1
+            if chess.square_rank(sq) == seventh:
+                observations.append(f"{GREEN}  + Rook on the 7th rank ({chess.square_name(sq)}){RESET}")
+
+        # Bishop pair
+        if len(self.board.pieces(chess.BISHOP, color)) >= 2:
+            observations.append(f"{GREEN}  + You have the bishop pair{RESET}")
+
+        return observations
+
+    def _is_outpost(self, sq, color):
+        """Check if a square is an outpost (enemy half, no opposing pawn can attack it)."""
+        rank = chess.square_rank(sq)
+        if color == chess.WHITE and rank < 4:
+            return False
+        if color == chess.BLACK and rank > 3:
+            return False
+        f = chess.square_file(sq)
+        opp = not color
+        for adj_f in [f - 1, f + 1]:
+            if 0 <= adj_f <= 7:
+                for opp_sq in self.board.pieces(chess.PAWN, opp):
+                    if chess.square_file(opp_sq) == adj_f:
+                        opp_r = chess.square_rank(opp_sq)
+                        if color == chess.WHITE and opp_r > rank:
+                            return False
+                        if color == chess.BLACK and opp_r < rank:
+                            return False
+        return True
+
+    def _is_open_file(self, file):
+        """No pawns of either color on this file."""
+        for r in range(8):
+            p = self.board.piece_at(chess.square(file, r))
+            if p and p.piece_type == chess.PAWN:
+                return False
+        return True
+
+    def _is_semi_open_file(self, file, color):
+        """No pawns of 'color' on this file, but opponent has pawns."""
+        has_own = has_opp = False
+        for r in range(8):
+            p = self.board.piece_at(chess.square(file, r))
+            if p and p.piece_type == chess.PAWN:
+                if p.color == color:
+                    has_own = True
+                else:
+                    has_opp = True
+        return not has_own and has_opp
+
+    # ── Tactical Pattern Detection ────────────────────────────────────
+
+    def detect_tactics(self):
+        """Detect pins, forks, and skewers in the current position."""
+        tactics = []
+        my = self.playing_as
+        opp = not my
+
+        # Pins: find opponent pieces pinned to their king
+        opp_king = self.board.king(opp)
+        if opp_king is not None:
+            for sq in self.board.piece_map():
+                p = self.board.piece_at(sq)
+                if p and p.color == opp and p.piece_type != chess.KING:
+                    if self.board.is_pinned(opp, sq):
+                        pinner = self.board.pin(opp, sq)
+                        tactics.append(f"{MAGENTA}Pin: {PIECE_NAMES.get(p.piece_type, '?')} on "
+                                     f"{chess.square_name(sq)} is pinned to the King{RESET}")
+
+        # Check if our pieces pin opponent pieces to queen
+        opp_queen_sqs = list(self.board.pieces(chess.QUEEN, opp))
+        for qsq in opp_queen_sqs:
+            for sq in self.board.piece_map():
+                piece = self.board.piece_at(sq)
+                if piece and piece.color == opp and piece.piece_type != chess.QUEEN:
+                    # Is this piece between our slider and their queen?
+                    pass  # King pins already covered above
+
+        # Fork detection in top engine moves
+        results, _ = self.analyze_position(multipv=3, think_time=QUICK_TIME)
+        for info in results[:3]:
+            pv = info.get("pv", [])
+            if not pv:
+                continue
+            move = pv[0]
+            piece = self.board.piece_at(move.from_square)
+            if not piece:
+                continue
+            # Check if after this move, the piece attacks 2+ valuable targets
+            temp = self.board.copy()
+            temp.push(move)
+            attacks = temp.attacks(move.to_square)
+            valuable_targets = []
+            for att_sq in attacks:
+                target = temp.piece_at(att_sq)
+                if target and target.color == opp:
+                    if target.piece_type in (chess.QUEEN, chess.ROOK, chess.KING):
+                        valuable_targets.append(target)
+                    elif target.piece_type in (chess.KNIGHT, chess.BISHOP) and \
+                         piece.piece_type == chess.PAWN:
+                        valuable_targets.append(target)
+            if len(valuable_targets) >= 2:
+                names = " and ".join(PIECE_NAMES.get(t.piece_type, "?") for t in valuable_targets[:2])
+                tactics.append(f"{MAGENTA}Fork: {self.board.san(move)} attacks {names}{RESET}")
+                break  # Only report one fork
+
+        return tactics[:5]
+
+    # ── Board Control & Space ─────────────────────────────────────────
+
+    def analyze_board_control(self):
+        """Full board control analysis: squares controlled, space advantage."""
+        my = self.playing_as
+        opp = not my
+        our_control = their_control = 0
+        our_space = their_space = 0
+
+        # Space = squares in opponent's half we control
+        my_space_ranks = range(4, 8) if my == chess.WHITE else range(0, 4)
+        opp_space_ranks = range(4, 8) if opp == chess.WHITE else range(0, 4)
+
+        for sq in range(64):
+            our_att = len(self.board.attackers(my, sq))
+            their_att = len(self.board.attackers(opp, sq))
+            # Piece occupation also counts
+            p = self.board.piece_at(sq)
+            if p and p.color == my:
+                our_att += 1
+            elif p and p.color == opp:
+                their_att += 1
+            if our_att > their_att:
+                our_control += 1
+            elif their_att > our_att:
+                their_control += 1
+            # Space
+            r = chess.square_rank(sq)
+            if r in my_space_ranks and our_att > 0:
+                our_space += 1
+            if r in opp_space_ranks and their_att > 0:
+                their_space += 1
+
+        return {
+            "our_control": our_control,
+            "their_control": their_control,
+            "our_space": our_space,
+            "their_space": their_space,
+        }
+
+    # ── Endgame Classification ────────────────────────────────────────
+
+    def classify_endgame(self):
+        """Classify the specific endgame type and return (name, advice)."""
+        my = self.playing_as
+        opp = not my
+        my_pieces = {pt: len(self.board.pieces(pt, my)) for pt in range(1, 7)}
+        opp_pieces = {pt: len(self.board.pieces(pt, opp)) for pt in range(1, 7)}
+        my_total = sum(v for k, v in my_pieces.items() if k != chess.KING)
+        opp_total = sum(v for k, v in opp_pieces.items() if k != chess.KING)
+
+        # Pure pawn endgames
+        if my_pieces[chess.QUEEN] == 0 and opp_pieces[chess.QUEEN] == 0 and \
+           my_pieces[chess.ROOK] == 0 and opp_pieces[chess.ROOK] == 0 and \
+           my_pieces[chess.BISHOP] == 0 and opp_pieces[chess.BISHOP] == 0 and \
+           my_pieces[chess.KNIGHT] == 0 and opp_pieces[chess.KNIGHT] == 0:
+            if my_pieces[chess.PAWN] == 0 and opp_pieces[chess.PAWN] == 0:
+                return "K vs K", "This is a dead draw."
+            if my_pieces[chess.PAWN] > 0 and opp_pieces[chess.PAWN] == 0:
+                return "K+P vs K", "Push your pawn with King support. Use opposition to promote."
+            if opp_pieces[chess.PAWN] > 0 and my_pieces[chess.PAWN] == 0:
+                return "K vs K+P", "Try to get in front of the pawn and use opposition to draw."
+            return "Pawn endgame", "King activity is everything. Count tempi and use opposition."
+
+        # Rook endgames
+        if my_pieces[chess.ROOK] > 0 and opp_pieces[chess.ROOK] > 0 and \
+           my_pieces[chess.QUEEN] == 0 and opp_pieces[chess.QUEEN] == 0 and \
+           my_pieces[chess.BISHOP] == 0 and opp_pieces[chess.BISHOP] == 0 and \
+           my_pieces[chess.KNIGHT] == 0 and opp_pieces[chess.KNIGHT] == 0:
+            return "Rook endgame", "Activate your rook behind passed pawns. Rooks belong on the 7th rank."
+
+        # Rook vs minor piece
+        if my_pieces[chess.ROOK] > 0 and opp_pieces[chess.ROOK] == 0 and opp_total <= 4:
+            return "Rook vs minor piece", "Rook is stronger — centralize it and create passed pawns."
+
+        # Queen endgames
+        if my_pieces[chess.QUEEN] > 0 and opp_pieces[chess.QUEEN] > 0 and \
+           my_pieces[chess.ROOK] == 0 and opp_pieces[chess.ROOK] == 0:
+            return "Queen endgame", "Watch for perpetual check. Use your Queen actively with King support."
+
+        # Bishop endgames
+        if my_pieces[chess.BISHOP] > 0 and opp_pieces[chess.BISHOP] > 0 and \
+           my_pieces[chess.ROOK] == 0 and opp_pieces[chess.ROOK] == 0 and \
+           my_pieces[chess.QUEEN] == 0 and opp_pieces[chess.QUEEN] == 0 and \
+           my_pieces[chess.KNIGHT] == 0 and opp_pieces[chess.KNIGHT] == 0:
+            # Same or opposite color?
+            my_bsqs = [sq for sq in self.board.pieces(chess.BISHOP, my)]
+            opp_bsqs = [sq for sq in self.board.pieces(chess.BISHOP, opp)]
+            if my_bsqs and opp_bsqs:
+                my_color = (chess.square_rank(my_bsqs[0]) + chess.square_file(my_bsqs[0])) % 2
+                opp_color = (chess.square_rank(opp_bsqs[0]) + chess.square_file(opp_bsqs[0])) % 2
+                if my_color == opp_color:
+                    return "Same-color bishop endgame", "Put pawns on opposite color from bishops. Activity is key."
+                else:
+                    return "Opposite-color bishop endgame", "These tend to be drawish. Attack on your bishop's color."
+            return "Bishop endgame", "Place pawns on opposite color from your bishop."
+
+        # Knight endgames
+        if my_pieces[chess.KNIGHT] > 0 and opp_pieces[chess.KNIGHT] > 0 and \
+           my_pieces[chess.ROOK] == 0 and opp_pieces[chess.ROOK] == 0 and \
+           my_pieces[chess.QUEEN] == 0 and opp_pieces[chess.QUEEN] == 0 and \
+           my_pieces[chess.BISHOP] == 0 and opp_pieces[chess.BISHOP] == 0:
+            return "Knight endgame", "Knights love closed positions. Centralize and create outposts."
+
+        # B+N vs K
+        if (my_pieces[chess.BISHOP] == 1 and my_pieces[chess.KNIGHT] == 1 and
+                my_pieces[chess.PAWN] == 0 and opp_total == 0):
+            return "B+N vs K", "Drive the King to the corner matching your bishop's color."
+
+        # R+P vs R (Lucena/Philidor)
+        if my_pieces[chess.ROOK] == 1 and opp_pieces[chess.ROOK] == 1 and \
+           my_pieces[chess.PAWN] >= 1 and opp_pieces[chess.PAWN] == 0 and \
+           my_pieces[chess.QUEEN] == 0 and opp_pieces[chess.QUEEN] == 0:
+            return "R+P vs R", "Aim for the Lucena position (King in front of pawn, rook on 4th)."
+
+        return "Complex endgame", "Activate your King, create passed pawns, and improve piece placement."
+
+    # ── Move Quality Classification ───────────────────────────────────
+
+    def classify_move_quality(self, cp_before, cp_after):
+        """Classify move quality based on centipawn change. Returns (label, cp_loss, color)."""
+        cp_loss = cp_before - cp_after
+        if cp_loss <= 10:
+            return "excellent", cp_loss, GREEN
+        elif cp_loss <= INACCURACY_THRESHOLD:
+            return "good", cp_loss, GREEN
+        elif cp_loss <= MISTAKE_THRESHOLD:
+            return "inaccuracy", cp_loss, YELLOW
+        elif cp_loss <= BLUNDER_THRESHOLD:
+            return "mistake", cp_loss, RED
+        else:
+            return "blunder", cp_loss, RED
+
+    def _score_to_cp(self, score):
+        """Convert a PovScore (already oriented) to centipawns. Mate = large value."""
+        if score.is_mate():
+            m = score.mate()
+            return 10000 - abs(m) * 10 if m > 0 else -10000 + abs(m) * 10
+        return score.score() or 0
+
+    def _track_eval(self, cp):
+        """Record eval and detect turning points."""
+        move_num = self.board.fullmove_number
+        color = not self.board.turn  # The side that just moved
+        self.eval_history.append((move_num, color, cp))
+        if len(self.eval_history) >= 2:
+            prev_cp = self.eval_history[-2][2]
+            swing = abs(cp - prev_cp)
+            if swing >= 100:
+                last_move = self.board.peek() if self.board.move_stack else None
+                san = ""
+                if last_move:
+                    temp = self.board.copy()
+                    temp.pop()
+                    san = temp.san(last_move)
+                self.turning_points.append((move_num, color, san, cp - prev_cp))
+
+    # ── Post-Game Summary ─────────────────────────────────────────────
+
+    def post_game_summary(self):
+        """Print comprehensive post-game analysis."""
+        lines = [
+            f"\n  {BOLD}{'═' * 52}{RESET}",
+            f"  {BOLD}  POST-GAME ANALYSIS{RESET}",
+            f"  {BOLD}{'═' * 52}{RESET}",
+        ]
+
+        if not self.move_quality_history:
+            lines.append(f"  {DIM}No move quality data available.{RESET}")
+            return "\n".join(lines)
+
+        # Count by quality for each side
+        my_stats = {"excellent": 0, "good": 0, "inaccuracy": 0, "mistake": 0, "blunder": 0}
+        opp_stats = {"excellent": 0, "good": 0, "inaccuracy": 0, "mistake": 0, "blunder": 0}
+        my_losses = []
+        opp_losses = []
+
+        for move_num, color, san, label, cp_loss in self.move_quality_history:
+            if color == self.playing_as:
+                my_stats[label] = my_stats.get(label, 0) + 1
+                my_losses.append(max(0, cp_loss))
+            else:
+                opp_stats[label] = opp_stats.get(label, 0) + 1
+                opp_losses.append(max(0, cp_loss))
+
+        # Accuracy
+        my_avg = sum(my_losses) / len(my_losses) if my_losses else 0
+        opp_avg = sum(opp_losses) / len(opp_losses) if opp_losses else 0
+        my_accuracy = max(0, min(100, 100 - my_avg / 2))
+        opp_accuracy = max(0, min(100, 100 - opp_avg / 2))
+
+        lines.append(f"\n  {BOLD}Your Performance:{RESET}")
+        acc_color = GREEN if my_accuracy >= 80 else YELLOW if my_accuracy >= 60 else RED
+        lines.append(f"  {acc_color}  Accuracy: {my_accuracy:.1f}%{RESET}  "
+                     f"{DIM}(avg {my_avg:.0f}cp loss/move){RESET}")
+        lines.append(f"    {GREEN}Excellent: {my_stats['excellent']}{RESET}  "
+                     f"{GREEN}Good: {my_stats['good']}{RESET}  "
+                     f"{YELLOW}Inaccuracies: {my_stats['inaccuracy']}{RESET}  "
+                     f"{RED}Mistakes: {my_stats['mistake']}{RESET}  "
+                     f"{RED}Blunders: {my_stats['blunder']}{RESET}")
+
+        lines.append(f"\n  {BOLD}Opponent Performance:{RESET}")
+        acc_color = GREEN if opp_accuracy >= 80 else YELLOW if opp_accuracy >= 60 else RED
+        lines.append(f"  {acc_color}  Accuracy: {opp_accuracy:.1f}%{RESET}  "
+                     f"{DIM}(avg {opp_avg:.0f}cp loss/move){RESET}")
+        lines.append(f"    {GREEN}Excellent: {opp_stats['excellent']}{RESET}  "
+                     f"{GREEN}Good: {opp_stats['good']}{RESET}  "
+                     f"{YELLOW}Inaccuracies: {opp_stats['inaccuracy']}{RESET}  "
+                     f"{RED}Mistakes: {opp_stats['mistake']}{RESET}  "
+                     f"{RED}Blunders: {opp_stats['blunder']}{RESET}")
+
+        # Turning points
+        if self.turning_points:
+            # Sort by absolute swing magnitude
+            sorted_tp = sorted(self.turning_points, key=lambda t: abs(t[3]), reverse=True)
+            lines.append(f"\n  {BOLD}Key Turning Points:{RESET}")
+            for mn, color, san, swing in sorted_tp[:5]:
+                side = "You" if color == self.playing_as else "Opponent"
+                direction = f"{RED}lost{RESET}" if (swing < 0 and color == self.playing_as) or \
+                            (swing > 0 and color != self.playing_as) else f"{GREEN}gained{RESET}"
+                lines.append(f"    Move {mn}: {side} played {BOLD}{san}{RESET} — "
+                           f"{direction} {abs(swing)/100:.1f} pawns")
+
+        # Eval graph (simple ASCII)
+        if len(self.eval_history) >= 4:
+            lines.append(f"\n  {BOLD}Eval Trend:{RESET}")
+            evals = [e[2] for e in self.eval_history]
+            max_e = max(abs(e) for e in evals) or 1
+            width = 40
+            for i, (mn, color, cp) in enumerate(self.eval_history):
+                bar_pos = int((cp / max_e) * (width // 2))
+                if i % 2 == 0 and i < len(self.eval_history) - 1:
+                    continue  # Show every other move to keep it compact
+                mid = width // 2
+                bar = [' '] * width
+                bar[mid] = '│'
+                if bar_pos > 0:
+                    for j in range(mid + 1, min(mid + bar_pos + 1, width)):
+                        bar[j] = '█'
+                elif bar_pos < 0:
+                    for j in range(max(mid + bar_pos, 0), mid):
+                        bar[j] = '░'
+                lines.append(f"    {mn:>3}. {''.join(bar)}")
+
+        lines.append(f"  {BOLD}{'═' * 52}{RESET}")
+        return "\n".join(lines)
 
     # ── Display ────────────────────────────────────────────────────────
 
@@ -892,8 +1519,40 @@ class ChessAdvisor:
             names = ", ".join(chess.square_name(sq) for sq in their_passed)
             lines.append(f"  {RED}  - Opponent has passed pawn{'s' if len(their_passed) > 1 else ''}: {names}{RESET}")
 
+        # Pawn structure
+        our_structure = self.analyze_pawn_structure(self.playing_as)
+        if our_structure["doubled"]:
+            files = ", ".join(chr(f + ord('a')) for f in our_structure["doubled"])
+            lines.append(f"  {YELLOW}  ~ Doubled pawns on file{'s' if len(our_structure['doubled']) > 1 else ''} {files}{RESET}")
+        if our_structure["isolated"]:
+            lines.append(f"  {YELLOW}  ~ Isolated pawn{'s' if len(our_structure['isolated']) > 1 else ''}: "
+                        f"{', '.join(our_structure['isolated'])}{RESET}")
+        if our_structure["backward"]:
+            lines.append(f"  {RED}  - Backward pawn{'s' if len(our_structure['backward']) > 1 else ''}: "
+                        f"{', '.join(our_structure['backward'])}{RESET}")
+        if our_structure["chains"] >= 3:
+            lines.append(f"  {GREEN}  + Strong pawn chain ({our_structure['chains']} connected){RESET}")
+
+        # Board control & space
+        control = self.analyze_board_control()
+        space_diff = control["our_space"] - control["their_space"]
+        if space_diff >= 6:
+            lines.append(f"  {GREEN}  + Significant space advantage ({control['our_space']} vs {control['their_space']} squares){RESET}")
+        elif space_diff <= -6:
+            lines.append(f"  {RED}  - Opponent has more space ({control['their_space']} vs {control['our_space']} squares){RESET}")
+        ctrl_diff = control["our_control"] - control["their_control"]
+        if ctrl_diff >= 8:
+            lines.append(f"  {GREEN}  + You control more of the board ({control['our_control']} vs {control['their_control']} squares){RESET}")
+        elif ctrl_diff <= -8:
+            lines.append(f"  {RED}  - Opponent controls more squares ({control['their_control']} vs {control['our_control']}){RESET}")
+
+        # Piece activity
+        activity = self.assess_piece_activity(self.playing_as)
+        for obs in activity[:4]:  # Cap to avoid clutter
+            lines.append(f"  {obs}")
+
         # Phase-specific strategy
-        lines.append(f"  {CYAN}{BOLD}  Strategy:{RESET}", )
+        lines.append(f"  {CYAN}{BOLD}  Strategy:{RESET}")
         if phase == "Opening":
             if can_castle and undeveloped >= 2:
                 lines.append(f"  {CYAN}  Develop your pieces and castle as soon as possible.{RESET}")
@@ -915,19 +1574,8 @@ class ChessAdvisor:
             else:
                 lines.append(f"  {CYAN}  Improve your piece activity and create threats.{RESET}")
         else:  # Endgame
-            if mat >= 3:
-                if our_passed:
-                    lines.append(f"  {CYAN}  Push your passed pawns with King support to promote!{RESET}")
-                else:
-                    lines.append(f"  {CYAN}  Activate your King and create a passed pawn to win.{RESET}")
-            elif mat <= -3:
-                lines.append(f"  {CYAN}  Try to blockade their pawns and seek drawing chances.{RESET}")
-            elif our_passed:
-                lines.append(f"  {CYAN}  Advance your passed pawns — they're your winning chance!{RESET}")
-            elif their_passed:
-                lines.append(f"  {CYAN}  Stop their passed pawns! Blockade with a piece on their path.{RESET}")
-            else:
-                lines.append(f"  {CYAN}  Activate your King aggressively and create a passed pawn.{RESET}")
+            eg_type, eg_advice = self.classify_endgame()
+            lines.append(f"  {CYAN}  [{eg_type}] {eg_advice}{RESET}")
 
         return "\n".join(lines)
 
@@ -1047,6 +1695,21 @@ class ChessAdvisor:
         mat = self.get_material_balance()
         mat_str = f"+{mat}" if mat > 0 else str(mat)
         detect = "AUTO" if self.auto_detect else "MANUAL"
+        opening = self.identify_opening()
+        opening_line = ""
+        if opening and mn <= 20:
+            opening_line = f"\n{BOLD}║{RESET}  {CYAN}Opening: {opening}{RESET}"
+            # Pad to fit box width
+            pad = 57 - len(f"  Opening: {opening}")
+            if pad > 0:
+                opening_line = f"\n{BOLD}║{RESET}  {CYAN}Opening: {opening}{RESET}{' ' * pad}{BOLD}║{RESET}"
+            else:
+                opening_line = f"\n{BOLD}║{RESET}  {CYAN}Opening: {opening}{RESET}"
+        endgame_line = ""
+        if phase == "Endgame":
+            eg_type, _ = self.classify_endgame()
+            pad = 57 - len(f"  Endgame: {eg_type}")
+            endgame_line = f"\n{BOLD}║{RESET}  {MAGENTA}Endgame: {eg_type}{RESET}{' ' * max(0, pad)}{BOLD}║{RESET}"
         return "\n".join([
             CLEAR,
             f"{BOLD}╔══════════════════════════════════════════════════════════╗{RESET}",
@@ -1054,7 +1717,8 @@ class ChessAdvisor:
             f"{BOLD}╠══════════════════════════════════════════════════════════╣{RESET}",
             f"{BOLD}║{RESET}  {ENGINE_THREADS} cores │ 2GB hash │ NNUE │ Detection: {detect:6s}       {BOLD}║{RESET}",
             f"{BOLD}╠══════════════════════════════════════════════════════════╣{RESET}",
-            f"{BOLD}║{RESET}  Playing: {BOLD}{color}{RESET}  │  Move: {mn}  │  Phase: {phase}  │  Material: {mat_str:>3}  {BOLD}║{RESET}",
+            f"{BOLD}║{RESET}  Playing: {BOLD}{color}{RESET}  │  Move: {mn}  │  Phase: {phase}  │  Material: {mat_str:>3}  {BOLD}║{RESET}"
+            + opening_line + endgame_line,
             f"{BOLD}╚══════════════════════════════════════════════════════════╝{RESET}",
         ])
 
@@ -1244,11 +1908,19 @@ class ChessAdvisor:
         out.append(f"  {self.get_move_reason(best_move, score, results)}")
         out.append(f"  {BOLD}{'─'*52}{RESET}")
 
+        # Tactical patterns
+        tactics = self.detect_tactics()
+        if tactics:
+            out.append(f"\n  {MAGENTA}{BOLD}Tactics spotted:{RESET}")
+            for t in tactics:
+                out.append(f"    {t}")
+
         # Position assessment with strategy
         out.append(self.get_position_assessment())
         print("\n".join(out))
 
         eval_before = score
+        best_cp = self._score_to_cp(score)
 
         while True:
             prompt = f"\n  Make this move in Chess.app, then press Enter"
@@ -1257,9 +1929,14 @@ class ChessAdvisor:
             user_input = input(f"{prompt}: ").strip()
 
             if user_input == "":
+                san = self.board.san(best_move)
                 self.board.push(best_move)
                 self.pgn_node = self.pgn_node.add_variation(best_move)
                 self.last_eval = eval_before
+                self.last_eval_cp = best_cp
+                self._track_eval(best_cp)
+                self.move_quality_history.append((
+                    self.board.fullmove_number, self.playing_as, san, "excellent", 0))
                 # Take reference screenshot AFTER our move for the next detection cycle
                 if self.auto_detect:
                     time.sleep(0.3)  # Let Chess.app animate our move
@@ -1284,9 +1961,33 @@ class ChessAdvisor:
             else:
                 parsed = self.parse_move(user_input)
                 if parsed:
+                    played_san = self.board.san(parsed)
                     self.board.push(parsed)
                     self.pgn_node = self.pgn_node.add_variation(parsed)
+                    # Quick eval of the position after the user's move
+                    try:
+                        quick_result = self.engine.analyse(
+                            self.board, chess.engine.Limit(time=1.0))
+                        after_score = quick_result["score"].white() if self.playing_as == chess.WHITE \
+                            else quick_result["score"].black()
+                        after_cp = self._score_to_cp(after_score)
+                        # Negate because it's now opponent's turn
+                        after_cp_oriented = -after_cp
+                        label, cp_loss, lcolor = self.classify_move_quality(best_cp, after_cp_oriented)
+                        self.move_quality_history.append((
+                            self.board.fullmove_number, self.playing_as, played_san, label, cp_loss))
+                        self._track_eval(after_cp_oriented)
+                        if cp_loss >= INACCURACY_THRESHOLD:
+                            print(f"  {lcolor}{label.upper()}: {played_san} "
+                                  f"({after_cp_oriented/100:+.2f}) — best was {best_san} "
+                                  f"({best_cp/100:+.2f}), lost {cp_loss/100:.1f} pawns{RESET}")
+                        elif parsed != best_move:
+                            print(f"  {GREEN}Good move! {played_san} is nearly as strong as {best_san}.{RESET}")
+                    except Exception:
+                        self.move_quality_history.append((
+                            self.board.fullmove_number, self.playing_as, played_san, "good", 0))
                     self.last_eval = eval_before
+                    self.last_eval_cp = best_cp
                     if self.auto_detect:
                         time.sleep(0.3)
                         self.watcher.take_reference()
@@ -1296,6 +1997,46 @@ class ChessAdvisor:
                     close = [m for m in legal if m.lower().startswith(user_input.lower()[:2])]
                     hint = f" Did you mean: {', '.join(close[:5])}?" if close else ""
                     print(f"  {RED}Invalid move.{hint}{RESET}")
+
+    def _evaluate_opponent_move(self, san, score_before):
+        """After opponent's move is pushed, evaluate it and detect blunders."""
+        opp = not self.playing_as
+        try:
+            quick = self.engine.analyse(self.board, chess.engine.Limit(time=1.0))
+            after_score = quick["score"].white() if self.playing_as == chess.WHITE \
+                else quick["score"].black()
+            after_cp = self._score_to_cp(after_score)
+            before_cp = self._score_to_cp(score_before)
+            # From opponent's perspective, they want OUR eval to go down
+            # So opponent's cp_loss = after_cp - before_cp (if positive, they lost ground)
+            opp_loss = after_cp - before_cp  # Positive = good for us = bad for opponent
+            self._track_eval(after_cp)
+            if opp_loss >= BLUNDER_THRESHOLD:
+                label = "blunder"
+                self.move_quality_history.append((
+                    self.board.fullmove_number, opp, san, "blunder", opp_loss))
+                print(f"  {RED}{BOLD}BLUNDER by opponent! {san} lost {opp_loss/100:.1f} pawns. "
+                      f"You're now at {after_cp/100:+.2f}{RESET}")
+            elif opp_loss >= MISTAKE_THRESHOLD:
+                label = "mistake"
+                self.move_quality_history.append((
+                    self.board.fullmove_number, opp, san, "mistake", opp_loss))
+                print(f"  {RED}Opponent mistake! {san} lost them {opp_loss/100:.1f} pawns.{RESET}")
+            elif opp_loss >= INACCURACY_THRESHOLD:
+                self.move_quality_history.append((
+                    self.board.fullmove_number, opp, san, "inaccuracy", opp_loss))
+                print(f"  {YELLOW}Opponent inaccuracy: {san} ({opp_loss/100:+.1f} for you){RESET}")
+            elif opp_loss <= -INACCURACY_THRESHOLD:
+                self.move_quality_history.append((
+                    self.board.fullmove_number, opp, san, "excellent", 0))
+                print(f"  {DIM}Strong move by opponent.{RESET}")
+            else:
+                self.move_quality_history.append((
+                    self.board.fullmove_number, opp, san, "good", max(0, opp_loss)))
+            self.last_eval_cp = after_cp
+        except Exception:
+            self.move_quality_history.append((
+                self.board.fullmove_number, opp, san, "good", 0))
 
     def opponent_turn(self):
         """Wait for opponent's move — auto-detect or manual input."""
@@ -1339,6 +2080,7 @@ class ChessAdvisor:
                 self.board.push(detected_move)
                 self.pgn_node = self.pgn_node.add_variation(detected_move)
                 print(f"\r  {BOLD}Opponent played: {san}{RESET} — {desc}")
+                self._evaluate_opponent_move(san, score)
                 return score
             else:
                 # Fall back to manual for this move
@@ -1366,6 +2108,7 @@ class ChessAdvisor:
                     self.board.push(parsed)
                     self.pgn_node = self.pgn_node.add_variation(parsed)
                     print(f"  Opponent played: {BOLD}{san}{RESET}")
+                    self._evaluate_opponent_move(san, score)
                     return score
                 else:
                     legal = [self.board.san(m) for m in self.board.legal_moves]
@@ -1517,10 +2260,13 @@ class ChessAdvisor:
             else:
                 print(f"  Game over: {self.board.result()}")
             print(f"  {BOLD}{'═'*52}{RESET}")
+            print(self.post_game_summary())
             print(f"\n  Game saved to {self.save_pgn()}")
 
         except KeyboardInterrupt:
             print(f"\n\n  {DIM}Session ended.{RESET}")
+            if self.move_quality_history:
+                print(self.post_game_summary())
             print(f"  Game saved to {self.save_pgn()}\n")
         finally:
             self.stop_engine()
