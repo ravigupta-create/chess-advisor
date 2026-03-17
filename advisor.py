@@ -723,6 +723,89 @@ class ChessAdvisor:
         self.board.pop()
         return desc
 
+    def human_instruction(self, move):
+        """Return a plain-English instruction like 'Move your Pawn on e2 to e4'."""
+        piece = self.board.piece_at(move.from_square)
+        captured = self.board.piece_at(move.to_square)
+        from_sq = chess.square_name(move.from_square)
+        to_sq = chess.square_name(move.to_square)
+        piece_name = PIECE_NAMES.get(piece.piece_type, "?") if piece else "?"
+
+        if self.board.is_castling(move):
+            if self.board.is_kingside_castling(move):
+                return "Castle kingside — move your King two squares right"
+            else:
+                return "Castle queenside — move your King two squares left"
+
+        if captured:
+            cap_name = PIECE_NAMES.get(captured.piece_type, "piece")
+            instr = f"Move your {piece_name} on {from_sq} to {to_sq}, capturing their {cap_name}"
+        else:
+            instr = f"Move your {piece_name} on {from_sq} to {to_sq}"
+
+        if self.board.is_en_passant(move):
+            instr += " (en passant capture)"
+        if move.promotion:
+            promo_name = PIECE_NAMES.get(move.promotion, "Queen")
+            instr += f", then promote to {promo_name}"
+
+        self.board.push(move)
+        if self.board.is_checkmate():
+            instr += " — CHECKMATE!"
+        elif self.board.is_check():
+            instr += " — puts their King in CHECK!"
+        self.board.pop()
+        return instr
+
+    def get_position_tip(self):
+        """Return a coaching tip based on the current game phase and position."""
+        phase = self.get_game_phase()
+        move_num = self.board.fullmove_number
+        mat = self.get_material_balance()
+        piece_map = self.board.piece_map()
+
+        # Check castling rights
+        can_castle = self.board.has_castling_rights(self.playing_as)
+        has_castled = not can_castle and move_num > 4
+
+        if phase == "Opening":
+            if move_num <= 3:
+                return "Opening: Control the center with pawns and develop your Knights and Bishops."
+            if can_castle and move_num >= 4:
+                return "Opening: Try to castle soon to protect your King and connect your Rooks."
+            # Check if knights/bishops are still on starting squares
+            developed = 0
+            back_rank = 0 if self.playing_as == chess.WHITE else 7
+            for file in range(8):
+                sq = chess.square(file, back_rank)
+                p = self.board.piece_at(sq)
+                if p and p.color == self.playing_as and p.piece_type in (chess.KNIGHT, chess.BISHOP):
+                    developed += 1
+            if developed >= 2:
+                return "Opening: You still have minor pieces on the back rank — develop them!"
+            return "Opening: Keep developing pieces and fight for the center."
+
+        elif phase == "Middlegame":
+            if self.board.is_check():
+                return "You're in check — get your King to safety first!"
+            if mat >= 3:
+                return "Middlegame: You're up material — simplify by trading pieces to convert your advantage."
+            elif mat <= -3:
+                return "Middlegame: You're down material — look for tactics and avoid more trades."
+            # Check for open files for rooks
+            return "Middlegame: Look for tactics, create threats, and keep your pieces active."
+
+        else:  # Endgame
+            if mat >= 3:
+                return "Endgame: Push your passed pawns and use your King actively to convert the win."
+            elif mat <= -3:
+                return "Endgame: Try to create a fortress or force a draw — activate your King."
+            # Check pawn count
+            our_pawns = len(self.board.pieces(chess.PAWN, self.playing_as))
+            if our_pawns == 0:
+                return "Endgame: No pawns left — you need piece activity to win or draw."
+            return "Endgame: Activate your King, push passed pawns, and cut off the opponent's King."
+
     def format_pv(self, pv, max_moves=PV_DEPTH_DISPLAY):
         temp = self.board.copy()
         parts = []
@@ -843,11 +926,13 @@ class ChessAdvisor:
         best_move = results[0]["pv"][0]
         best_san = self.board.san(best_move)
         best_desc = None
+        best_instruction = None
 
         for i, info in enumerate(results):
             move = info["pv"][0]
             mv_score = info["score"].white() if self.playing_as == chess.WHITE else info["score"].black()
             desc = self.describe_move(move)
+            instruction = self.human_instruction(move)
             san = self.board.san(move)
             pv_str = self.format_pv(info["pv"])
             depth = info.get("depth", "?")
@@ -858,18 +943,23 @@ class ChessAdvisor:
                 sc = f"{(mv_score.score() or 0)/100:+.2f}"
             if i == 0:
                 best_desc = desc
+                best_instruction = instruction
                 out.append(f"  {GREEN}{BOLD}▶ #{i+1} {san:8s} [{sc:>7}] d{depth}{RESET}")
-                out.append(f"    {GREEN}{desc}{RESET}")
+                out.append(f"    {GREEN}{instruction}{RESET}")
                 out.append(f"    {DIM}Line: {pv_str}{RESET}")
             else:
-                out.append(f"  {DIM}  #{i+1} {san:8s} [{sc:>7}] d{depth} — {desc}{RESET}")
+                out.append(f"  {DIM}  #{i+1} {san:8s} [{sc:>7}] d{depth} — {instruction}{RESET}")
                 if len(info["pv"]) > 1:
                     out.append(f"    {DIM}   Line: {pv_str}{RESET}")
 
         out.append(f"\n  {BOLD}{'─'*52}{RESET}")
         out.append(f"  {GREEN}{BOLD}➤ PLAY: {best_san}{RESET}")
-        out.append(f"  {GREEN}{BOLD}  {best_desc}{RESET}")
+        out.append(f"  {GREEN}{BOLD}  {best_instruction}{RESET}")
         out.append(f"  {BOLD}{'─'*52}{RESET}")
+
+        # Game-phase coaching tip
+        tip = self.get_position_tip()
+        out.append(f"  {CYAN}{tip}{RESET}")
         print("\n".join(out))
 
         eval_before = score
