@@ -38,7 +38,6 @@ ENGINE_CONFIG = {
     "Skill Level": 20,
     "UCI_LimitStrength": False,
     "UCI_ShowWDL": True,
-    "MultiPV": 1,
 }
 
 # ── Analysis settings ──────────────────────────────────────────────────
@@ -1100,6 +1099,69 @@ class ChessAdvisor:
             f.write(self.export_pgn())
         return path
 
+    # ── Auto-import from Chess.app ────────────────────────────────────
+
+    def _get_chessapp_pgn(self):
+        """Try to get the current game PGN from Apple Chess.app via AppleScript."""
+        try:
+            # Chess.app stores its current game; we can grab it via temp PGN export
+            # First try: ask Chess.app for the game document's file path
+            result = subprocess.run(
+                ['osascript', '-e',
+                 'tell application "Chess" to return name of front document'],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode != 0:
+                return None
+
+            # Use AppleScript to copy the game as PGN to a temp file
+            fd, tmp = tempfile.mkstemp(suffix='.pgn', prefix='chess_import_')
+            os.close(fd)
+            try:
+                # Chess.app supports "save" via AppleScript — save current game as PGN
+                script = f'''
+                    tell application "Chess"
+                        set gameDoc to front document
+                        save gameDoc in POSIX file "{tmp}"
+                    end tell
+                '''
+                result = subprocess.run(
+                    ['osascript', '-e', script],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0 and os.path.getsize(tmp) > 0:
+                    with open(tmp, 'r') as f:
+                        pgn_text = f.read()
+                    os.unlink(tmp)
+                    if pgn_text.strip():
+                        return pgn_text
+                os.unlink(tmp)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except Exception:
+                    pass
+
+            # Fallback: check if Chess.app has a recently saved file
+            # Look for the most recent .pgn in the default Chess.app save location
+            chess_dir = os.path.expanduser("~/Documents")
+            if os.path.isdir(chess_dir):
+                pgn_files = []
+                for f in os.listdir(chess_dir):
+                    if f.endswith('.pgn'):
+                        full = os.path.join(chess_dir, f)
+                        pgn_files.append((os.path.getmtime(full), full))
+                if pgn_files:
+                    pgn_files.sort(reverse=True)
+                    newest_time, newest_file = pgn_files[0]
+                    # Only use if modified in the last 5 minutes (likely current game)
+                    if time.time() - newest_time < 300:
+                        with open(newest_file, 'r') as f:
+                            return f.read()
+        except Exception:
+            pass
+        return None
+
     # ── Turn handlers ──────────────────────────────────────────────────
 
     def my_turn(self):
@@ -1343,31 +1405,52 @@ class ChessAdvisor:
                 break
             print(f"  {RED}Enter 'w' or 'b'{RESET}")
 
-        # Resume existing game
-        print(f"\n  {DIM}Resume a game? Enter moves (space-separated) or press Enter.{RESET}")
-        existing = input(f"  Moves: ").strip()
-        if existing:
+        # Auto-detect current game from Chess.app, or manual resume
+        game_loaded = False
+        pgn_text = self._get_chessapp_pgn()
+        if pgn_text:
             try:
-                pgn_io = io.StringIO(existing)
+                pgn_io = io.StringIO(pgn_text)
                 game = chess.pgn.read_game(pgn_io)
                 if game:
+                    move_count = 0
                     for move in game.mainline_moves():
                         self.board.push(move)
                         self.pgn_node = self.pgn_node.add_variation(move)
-                else:
-                    raise ValueError()
+                        move_count += 1
+                    if move_count > 0:
+                        game_loaded = True
+                        print(f"\n  {GREEN}{BOLD}Auto-imported {move_count} moves from Chess.app!{RESET}")
+                        print(f"  {DIM}Game at move {self.board.fullmove_number}, "
+                              f"{'White' if self.board.turn == chess.WHITE else 'Black'} to move{RESET}")
             except Exception:
-                for m in existing.split():
-                    if re.match(r'^\d+\.+$', m):
-                        continue
-                    parsed = self.parse_move(m)
-                    if parsed:
-                        self.board.push(parsed)
-                        self.pgn_node = self.pgn_node.add_variation(parsed)
+                pass
+
+        if not game_loaded:
+            print(f"\n  {DIM}Resume a game? Enter moves (space-separated) or press Enter for new game.{RESET}")
+            existing = input(f"  Moves: ").strip()
+            if existing:
+                try:
+                    pgn_io = io.StringIO(existing)
+                    game = chess.pgn.read_game(pgn_io)
+                    if game:
+                        for move in game.mainline_moves():
+                            self.board.push(move)
+                            self.pgn_node = self.pgn_node.add_variation(move)
                     else:
-                        safe_m = re.sub(r'[^\x20-\x7e]', '', m)
-                        print(f"  {RED}Couldn't parse '{safe_m}', stopping here.{RESET}")
-                        break
+                        raise ValueError()
+                except Exception:
+                    for m in existing.split():
+                        if re.match(r'^\d+\.+$', m):
+                            continue
+                        parsed = self.parse_move(m)
+                        if parsed:
+                            self.board.push(parsed)
+                            self.pgn_node = self.pgn_node.add_variation(parsed)
+                        else:
+                            safe_m = re.sub(r'[^\x20-\x7e]', '', m)
+                            print(f"  {RED}Couldn't parse '{safe_m}', stopping here.{RESET}")
+                            break
 
         # Initialize auto-detection
         print()
